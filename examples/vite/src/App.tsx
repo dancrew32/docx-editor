@@ -93,6 +93,10 @@ export function App() {
   const [documentBuffer, setDocumentBuffer] = useState<ArrayBuffer | null>(null);
   const [fileName, setFileName] = useState<string>('docx-editor-demo.docx');
   const [status, setStatus] = useState<string>('');
+  const disableFindReplaceShortcuts = useMemo(
+    () => new URLSearchParams(window.location.search).get('disableFindReplaceShortcuts') === '1',
+    []
+  );
 
   const { zoom: autoZoom, isMobile } = useResponsiveLayout();
 
@@ -328,6 +332,7 @@ export function App() {
           showRuler={!isMobile}
           showZoomControl={true}
           initialZoom={autoZoom}
+          disableFindReplaceShortcuts={disableFindReplaceShortcuts}
           renderLogo={renderLogo}
           documentName={fileName}
           onDocumentNameChange={setFileName}
