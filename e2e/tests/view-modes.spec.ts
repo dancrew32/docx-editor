@@ -38,6 +38,11 @@ async function selectPageViewMode(page: Page, mode: 'onePage' | 'multiplePages' 
   await page.getByTestId(`page-view-mode-${mode}`).click();
 }
 
+async function selectZoomLevel(page: Page, level: number) {
+  await page.getByTestId('zoom-control').click();
+  await page.getByTestId(`zoom-level-${level}`).click();
+}
+
 test.describe('document page view modes', () => {
   test('defaults to one-page vertical stacking on wide viewports', async ({ page }) => {
     await page.setViewportSize({ width: 1900, height: 1000 });
@@ -72,6 +77,24 @@ test.describe('document page view modes', () => {
     await secondPageText.click();
     await page.keyboard.type('ViewModeSmoke');
     await expect(page.locator('.ProseMirror')).toContainText('ViewModeSmoke');
+  });
+
+  test('multiple-pages mode uses the visible zoomed width when wrapping pages', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1320, height: 1000 });
+    await loadMultiPageFixture(page);
+
+    await selectPageViewMode(page, 'multiplePages');
+    await selectZoomLevel(page, 50);
+
+    await page.waitForFunction(() => {
+      const pages = Array.from(document.querySelectorAll<HTMLElement>('.layout-page'));
+      if (pages.length < 2) return false;
+      const first = pages[0].getBoundingClientRect();
+      const second = pages[1].getBoundingClientRect();
+      return Math.abs(first.top - second.top) < 8 && second.left > first.right;
+    });
   });
 
   test('page-width mode fits the page to the viewport and responds to resize', async ({ page }) => {

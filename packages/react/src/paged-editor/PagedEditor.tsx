@@ -222,6 +222,21 @@ function getPageArrangement(pageViewMode: PageViewMode): PageArrangement {
   return pageViewMode === 'multiplePages' ? 'wrapped' : 'column';
 }
 
+function getWrappedPageScale(pageArrangement: PageArrangement, zoom: number): number {
+  if (pageArrangement !== 'wrapped') return 1;
+  return Math.max(zoom, 0.01);
+}
+
+function getPageArrangementViewportWidth(
+  pageArrangement: PageArrangement,
+  viewportWidth: number,
+  zoom: number
+): number {
+  return pageArrangement === 'wrapped'
+    ? viewportWidth / getWrappedPageScale(pageArrangement, zoom)
+    : viewportWidth;
+}
+
 function computePageVisualOffsets(
   layout: Layout,
   pageGap: number,
@@ -1391,6 +1406,12 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
     // State
     const [layout, setLayout] = useState<Layout | null>(null);
     const [viewportWidth, setViewportWidth] = useState(0);
+    const wrappedPageScale = getWrappedPageScale(pageArrangement, zoom);
+    const arrangedViewportWidth = getPageArrangementViewportWidth(
+      pageArrangement,
+      viewportWidth,
+      zoom
+    );
     const lastTotalPagesRef = useRef<number>(0);
     const onTotalPagesChangeRef = useRef(onTotalPagesChange);
     onTotalPagesChangeRef.current = onTotalPagesChange;
@@ -1861,6 +1882,7 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
               footnotesByPage: footnotesByPage?.size ? footnotesByPage : undefined,
               resolvedCommentIds,
               pageArrangement,
+              pageScale: wrappedPageScale,
             } as RenderPageOptions & {
               pageGap?: number;
               blockLookup?: BlockLookup;
@@ -1869,7 +1891,12 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
 
             const vp = viewportLayoutRef.current;
             if (vp) {
-              const mh = viewportMinHeightPx(newLayout, pageGap, pageArrangement, viewportWidth);
+              const mh = viewportMinHeightPx(
+                newLayout,
+                pageGap,
+                pageArrangement,
+                arrangedViewportWidth
+              );
               vp.style.minHeight = `${mh}px`;
               if (zoom !== 1) {
                 vp.style.marginBottom = `${mh * (zoom - 1)}px`;
@@ -1920,7 +1947,7 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
               newLayout,
               pageGap,
               pageArrangement,
-              viewportWidth
+              arrangedViewportWidth
             );
             const positions = computeAnchorPositions(
               hiddenPMRef.current?.getView() ?? null,
@@ -1972,7 +1999,8 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
         resolvedCommentIds,
         getScrollContainer,
         pageArrangement,
-        viewportWidth,
+        arrangedViewportWidth,
+        wrappedPageScale,
       ]
     );
 
@@ -4026,7 +4054,7 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
         layout,
         pageGap,
         pageArrangement,
-        viewportWidth
+        arrangedViewportWidth
       );
       const positions = computeAnchorPositions(
         hiddenPMRef.current?.getView() ?? null,
@@ -4044,7 +4072,7 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
       onAnchorPositionsChange,
       pageArrangement,
       pageGap,
-      viewportWidth,
+      arrangedViewportWidth,
     ]);
 
     // Re-compute selection overlay when the container resizes.
@@ -4174,8 +4202,8 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
     // Calculate total height for scroll
     const totalHeight = useMemo(() => {
       if (!layout) return DEFAULT_PAGE_HEIGHT + 48;
-      return viewportMinHeightPx(layout, pageGap, pageArrangement, viewportWidth);
-    }, [layout, pageArrangement, pageGap, viewportWidth]);
+      return viewportMinHeightPx(layout, pageGap, pageArrangement, arrangedViewportWidth);
+    }, [layout, pageArrangement, pageGap, arrangedViewportWidth]);
     const renderedPagesContainerStyles = useMemo<CSSProperties>(() => {
       const isWrapped = pageArrangement === 'wrapped';
       return {
@@ -4185,10 +4213,10 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
         justifyContent: isWrapped ? 'center' : undefined,
         alignItems: isWrapped ? 'flex-start' : 'center',
         alignContent: isWrapped ? 'flex-start' : undefined,
-        width: '100%',
+        width: isWrapped ? `${100 / wrappedPageScale}%` : '100%',
         boxSizing: 'border-box',
       };
-    }, [pageArrangement]);
+    }, [pageArrangement, wrappedPageScale]);
 
     return (
       <div

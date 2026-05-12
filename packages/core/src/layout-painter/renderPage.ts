@@ -230,6 +230,8 @@ export interface RenderPageOptions {
   resolvedCommentIds?: Set<number>;
   /** Arrangement for the page container when rendering multiple pages. */
   pageArrangement?: 'column' | 'wrapped';
+  /** Current visual page scale used by the outer viewport transform. */
+  pageScale?: number;
 }
 
 export interface HeaderFooterLayoutInfo {
@@ -1773,9 +1775,11 @@ function computeOptionsHash(options: RenderPageOptions): string {
 function applyContainerStyles(
   container: HTMLElement,
   pageGap: number,
-  pageArrangement: 'column' | 'wrapped' = 'column'
+  pageArrangement: 'column' | 'wrapped' = 'column',
+  pageScale = 1
 ): void {
   const isWrapped = pageArrangement === 'wrapped';
+  const effectiveScale = Math.max(pageScale, 0.01);
   container.style.display = 'flex';
   container.style.flexDirection = isWrapped ? 'row' : 'column';
   container.style.flexWrap = isWrapped ? 'wrap' : 'nowrap';
@@ -1784,7 +1788,7 @@ function applyContainerStyles(
   container.style.alignContent = isWrapped ? 'flex-start' : '';
   container.style.gap = `${pageGap}px`;
   container.style.padding = `${pageGap}px`;
-  container.style.width = '100%';
+  container.style.width = isWrapped ? `${100 / effectiveScale}%` : '100%';
   container.style.boxSizing = 'border-box';
   container.style.backgroundColor = 'var(--doc-bg, #f8f9fa)';
 }
@@ -1828,6 +1832,8 @@ export function renderPages(
   const prevState = pc.__pageRenderState;
   const currentOptionsHash = computeOptionsHash(options);
   const useVirtualization = totalPages >= VIRTUALIZATION_THRESHOLD;
+
+  applyContainerStyles(container, pageGap, options.pageArrangement, options.pageScale ?? 1);
 
   // Determine if we can do an incremental update
   const canIncremental =
@@ -1948,8 +1954,6 @@ export function renderPages(
   // Clear existing content
   container.innerHTML = '';
   pc.__pageRenderState = undefined;
-
-  applyContainerStyles(container, pageGap, options.pageArrangement);
 
   // Build all page shells
   const pageShells: HTMLElement[] = [];

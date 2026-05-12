@@ -79,12 +79,17 @@ export function ZoomControl({
       <SelectTrigger
         className={cn(compact ? 'h-7 min-w-[55px] text-xs' : 'h-8 min-w-[70px] text-sm', className)}
         aria-label={t('zoom.ariaLabel', { label: displayLabel })}
+        data-testid="zoom-control"
       >
         <SelectValue placeholder="100%">{displayLabel}</SelectValue>
       </SelectTrigger>
       <SelectContent>
         {levels.map((level) => (
-          <SelectItem key={level.value} value={level.value.toString()}>
+          <SelectItem
+            key={level.value}
+            value={level.value.toString()}
+            data-testid={`zoom-level-${Math.round(level.value * 100)}`}
+          >
             {level.label}
           </SelectItem>
         ))}
