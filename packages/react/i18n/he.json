@@ -127,6 +127,13 @@
   "zoom": {
     "ariaLabel": "זום: {label}"
   },
+  "pageView": {
+    "ariaLabel": null,
+    "title": null,
+    "onePage": null,
+    "multiplePages": null,
+    "pageWidth": null
+  },
   "colorPicker": {
     "ariaLabel": "בחר צבע {type}",
     "highlightColors": "צבע סימון",

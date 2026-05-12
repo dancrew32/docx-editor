@@ -228,6 +228,8 @@ export interface RenderPageOptions {
   footnoteArea?: FootnoteRenderItem[];
   /** Comment IDs that are resolved — skip highlight for these */
   resolvedCommentIds?: Set<number>;
+  /** Arrangement for the page container when rendering multiple pages. */
+  pageArrangement?: 'column' | 'wrapped';
 }
 
 export interface HeaderFooterLayoutInfo {
@@ -1760,6 +1762,7 @@ function computeOptionsHash(options: RenderPageOptions): string {
   // Header/footer distances
   if (options.headerDistance !== undefined) parts.push(`hd:${options.headerDistance}`);
   if (options.footerDistance !== undefined) parts.push(`fd:${options.footerDistance}`);
+  if (options.pageArrangement) parts.push(`pa:${options.pageArrangement}`);
 
   return parts.join('|');
 }
@@ -1767,12 +1770,22 @@ function computeOptionsHash(options: RenderPageOptions): string {
 /**
  * Apply standard container styles for the pages wrapper.
  */
-function applyContainerStyles(container: HTMLElement, pageGap: number): void {
+function applyContainerStyles(
+  container: HTMLElement,
+  pageGap: number,
+  pageArrangement: 'column' | 'wrapped' = 'column'
+): void {
+  const isWrapped = pageArrangement === 'wrapped';
   container.style.display = 'flex';
-  container.style.flexDirection = 'column';
-  container.style.alignItems = 'center';
+  container.style.flexDirection = isWrapped ? 'row' : 'column';
+  container.style.flexWrap = isWrapped ? 'wrap' : 'nowrap';
+  container.style.justifyContent = isWrapped ? 'center' : '';
+  container.style.alignItems = isWrapped ? 'flex-start' : 'center';
+  container.style.alignContent = isWrapped ? 'flex-start' : '';
   container.style.gap = `${pageGap}px`;
   container.style.padding = `${pageGap}px`;
+  container.style.width = '100%';
+  container.style.boxSizing = 'border-box';
   container.style.backgroundColor = 'var(--doc-bg, #f8f9fa)';
 }
 
@@ -1936,7 +1949,7 @@ export function renderPages(
   container.innerHTML = '';
   pc.__pageRenderState = undefined;
 
-  applyContainerStyles(container, pageGap);
+  applyContainerStyles(container, pageGap, options.pageArrangement);
 
   // Build all page shells
   const pageShells: HTMLElement[] = [];

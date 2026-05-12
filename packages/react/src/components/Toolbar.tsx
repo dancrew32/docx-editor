@@ -101,6 +101,11 @@ export type FormattingAction =
   | { type: 'applyStyle'; value: string };
 
 /**
+ * Page viewing mode for the visible paginated canvas.
+ */
+export type DocumentViewMode = 'onePage' | 'multiplePages' | 'pageWidth';
+
+/**
  * Props for the Toolbar component
  */
 export interface ToolbarProps {
@@ -169,6 +174,12 @@ export interface ToolbarProps {
   zoom?: number;
   /** Callback when zoom changes */
   onZoomChange?: (zoom: number) => void;
+  /** Whether to show the page view mode control (default: true) */
+  showPageViewModeControl?: boolean;
+  /** Current document page view mode */
+  documentViewMode?: DocumentViewMode;
+  /** Callback when document page view mode changes */
+  onDocumentViewModeChange?: (mode: DocumentViewMode) => void;
   /** Callback to refocus the editor after toolbar interactions */
   onRefocusEditor?: () => void;
   /** Callback when a table should be inserted */

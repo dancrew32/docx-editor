@@ -127,6 +127,13 @@
   "zoom": {
     "ariaLabel": "缩放: {label}"
   },
+  "pageView": {
+    "ariaLabel": null,
+    "title": null,
+    "onePage": null,
+    "multiplePages": null,
+    "pageWidth": null
+  },
   "colorPicker": {
     "ariaLabel": "{type} 颜色选择器",
     "highlightColors": "突出显示颜色",

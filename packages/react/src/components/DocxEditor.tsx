@@ -34,6 +34,7 @@ import {
   ToolbarSeparator,
   type SelectionFormatting,
   type FormattingAction,
+  type DocumentViewMode,
 } from './Toolbar';
 import type { FontOption } from './ui/FontPicker';
 import { EditorToolbar } from './EditorToolbar';
@@ -281,6 +282,8 @@ export interface DocxEditorProps {
   showToolbar?: boolean;
   /** Whether to show zoom control (default: true) */
   showZoomControl?: boolean;
+  /** Whether to show page view mode control (default: true) */
+  showPageViewModeControl?: boolean;
   /** Whether to show page margin guides/boundaries (default: false) */
   showMarginGuides?: boolean;
   /** Color for margin guides (default: '#c0c0c0') */
@@ -291,6 +294,8 @@ export interface DocxEditorProps {
   rulerUnit?: 'inch' | 'cm';
   /** Initial zoom level (default: 1.0) */
   initialZoom?: number;
+  /** Initial page view mode (default: 'onePage') */
+  initialDocumentViewMode?: DocumentViewMode;
   /** Whether the editor is read-only. When true, hides toolbar and rulers */
   readOnly?: boolean;
   /**
@@ -568,6 +573,7 @@ interface EditorState {
   isLoading: boolean;
   parseError: string | null;
   zoom: number;
+  documentViewMode: DocumentViewMode;
   /** Current selection formatting for toolbar */
   selectionFormatting: SelectionFormatting;
   /** Paragraph indent data for ruler */
@@ -1263,11 +1269,13 @@ export const DocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(function Do
     theme,
     showToolbar = true,
     showZoomControl = true,
+    showPageViewModeControl = true,
     showMarginGuides: _showMarginGuides = false,
     marginGuideColor: _marginGuideColor,
     showRuler = false,
     rulerUnit = 'inch',
     initialZoom = 1.0,
+    initialDocumentViewMode = 'onePage',
     readOnly: readOnlyProp = false,
     disableFindReplaceShortcuts = false,
     toolbarExtra,
@@ -1315,6 +1323,7 @@ export const DocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(function Do
     isLoading: !!documentBuffer && !externalContent,
     parseError: null,
     zoom: initialZoom,
+    documentViewMode: initialDocumentViewMode,
     selectionFormatting: {},
     paragraphIndentLeft: 0,
     paragraphIndentRight: 0,
@@ -2941,7 +2950,11 @@ export const DocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(function Do
 
   // Handle zoom change
   const handleZoomChange = useCallback((zoom: number) => {
-    setState((prev) => ({ ...prev, zoom }));
+    setState((prev) => ({
+      ...prev,
+      zoom,
+      documentViewMode: prev.documentViewMode === 'pageWidth' ? 'onePage' : prev.documentViewMode,
+    }));
   }, []);
 
   // Handle hyperlink dialog submit
@@ -3544,25 +3557,43 @@ export const DocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(function Do
       const layout = pagedEditorRef.current?.getLayout();
       if (!layout || layout.pages.length === 0) return;
 
-      const scrollTop = scrollContainerEl.scrollTop;
       const totalPages = layout.pages.length;
-      const pageGap = 24; // DEFAULT_PAGE_GAP from PagedEditor
-      const paddingTop = 24; // top padding in paged-editor__pages
-
-      // Calculate which page is visible at the viewport center
-      const viewportCenter = scrollTop + scrollContainerEl.clientHeight / 2;
-      let accumulatedY = paddingTop;
+      const pages = Array.from(
+        scrollContainerEl.querySelectorAll<HTMLElement>('.paged-editor__pages .layout-page')
+      );
       let currentPage = 1;
+      if (pages.length > 0) {
+        const viewportRect = scrollContainerEl.getBoundingClientRect();
+        const viewportCenterY = viewportRect.top + viewportRect.height / 2;
+        let bestPageNumber = 1;
+        let bestVisibleArea = -1;
+        let bestCenterDistance = Number.POSITIVE_INFINITY;
 
-      for (let i = 0; i < layout.pages.length; i++) {
-        const pageHeight = layout.pages[i].size.h;
-        const pageEnd = accumulatedY + pageHeight;
-        if (viewportCenter < pageEnd) {
-          currentPage = i + 1;
-          break;
+        for (let i = 0; i < pages.length; i++) {
+          const pageRect = pages[i].getBoundingClientRect();
+          const visibleWidth = Math.max(
+            0,
+            Math.min(pageRect.right, viewportRect.right) -
+              Math.max(pageRect.left, viewportRect.left)
+          );
+          const visibleHeight = Math.max(
+            0,
+            Math.min(pageRect.bottom, viewportRect.bottom) -
+              Math.max(pageRect.top, viewportRect.top)
+          );
+          const visibleArea = visibleWidth * visibleHeight;
+          const centerDistance = Math.abs(pageRect.top + pageRect.height / 2 - viewportCenterY);
+
+          if (
+            visibleArea > bestVisibleArea ||
+            (visibleArea === bestVisibleArea && centerDistance < bestCenterDistance)
+          ) {
+            bestVisibleArea = visibleArea;
+            bestCenterDistance = centerDistance;
+            bestPageNumber = Number(pages[i].dataset.pageNumber) || i + 1;
+          }
         }
-        accumulatedY = pageEnd + pageGap;
-        currentPage = i + 2; // next page
+        currentPage = bestPageNumber;
       }
       currentPage = Math.min(currentPage, totalPages);
 
@@ -3579,13 +3610,15 @@ export const DocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(function Do
     };
 
     scrollContainerEl.addEventListener('scroll', handleScroll, { passive: true });
+    const frame = requestAnimationFrame(handleScroll);
     return () => {
+      cancelAnimationFrame(frame);
       scrollContainerEl.removeEventListener('scroll', handleScroll);
       if (scrollFadeTimerRef.current) {
         clearTimeout(scrollFadeTimerRef.current);
       }
     };
-  }, [scrollContainerEl]);
+  }, [scrollContainerEl, state.documentViewMode]);
 
   // Handle save
   const handleSave = useCallback(
@@ -3929,7 +3962,13 @@ body { background: white; }
       getDocument: () => history.state,
       getEditorRef: () => pagedEditorRef.current,
       save: handleSave,
-      setZoom: (zoom: number) => setState((prev) => ({ ...prev, zoom })),
+      setZoom: (zoom: number) =>
+        setState((prev) => ({
+          ...prev,
+          zoom,
+          documentViewMode:
+            prev.documentViewMode === 'pageWidth' ? 'onePage' : prev.documentViewMode,
+        })),
       getZoom: () => state.zoom,
       focus: () => {
         pagedEditorRef.current?.focus();
@@ -4801,6 +4840,49 @@ body { background: white; }
     ? Math.round(sectionPropsPageWidth / 15)
     : DEFAULT_PAGE_WIDTH;
 
+  const calculatePageWidthZoom = useCallback((): number | null => {
+    const scrollContainer = scrollContainerRef.current;
+    if (!scrollContainer || pageWidthPx <= 0) return null;
+
+    const sidebarAllowance = sidebarOpen ? SIDEBAR_DOCUMENT_SHIFT * 2 : 0;
+    const availableWidth =
+      scrollContainer.clientWidth - 2 * outlineLeftAllowance - sidebarAllowance - 48;
+    const fitZoom = availableWidth / pageWidthPx;
+    return Math.max(0.25, Math.min(2, Math.round(fitZoom * 100) / 100));
+  }, [outlineLeftAllowance, pageWidthPx, sidebarOpen]);
+
+  const applyPageWidthZoom = useCallback(() => {
+    const fitZoom = calculatePageWidthZoom();
+    if (fitZoom == null) return;
+    setState((prev) => (prev.zoom === fitZoom ? prev : { ...prev, zoom: fitZoom }));
+  }, [calculatePageWidthZoom]);
+
+  const handleDocumentViewModeChange = useCallback(
+    (mode: DocumentViewMode) => {
+      setState((prev) => ({ ...prev, documentViewMode: mode }));
+      if (mode === 'pageWidth') {
+        requestAnimationFrame(applyPageWidthZoom);
+      }
+    },
+    [applyPageWidthZoom]
+  );
+
+  useEffect(() => {
+    if (state.documentViewMode !== 'pageWidth') return;
+    applyPageWidthZoom();
+
+    const scrollContainer = scrollContainerRef.current;
+    if (!scrollContainer) return;
+
+    const observer = new ResizeObserver(applyPageWidthZoom);
+    observer.observe(scrollContainer);
+    window.addEventListener('resize', applyPageWidthZoom);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', applyPageWidthZoom);
+    };
+  }, [applyPageWidthZoom, state.documentViewMode]);
+
   const resolvedCommentIds = useMemo(() => {
     const ids = new Set<number>();
     for (const c of comments) {
@@ -4955,6 +5037,9 @@ body { background: white; }
                       showZoomControl={showZoomControl}
                       zoom={state.zoom}
                       onZoomChange={handleZoomChange}
+                      showPageViewModeControl={showPageViewModeControl}
+                      documentViewMode={state.documentViewMode}
+                      onDocumentViewModeChange={handleDocumentViewModeChange}
                       onRefocusEditor={focusActiveEditor}
                       onInsertTable={handleInsertTable}
                       showTableInsert={true}
@@ -5150,6 +5235,7 @@ body { background: white; }
                         hfEditMode={hfEditPosition}
                         onBodyClick={handleBodyClick}
                         zoom={state.zoom}
+                        pageViewMode={state.documentViewMode}
                         readOnly={readOnly}
                         extensionManager={extensionManager}
                         onDocumentChange={handleDocumentChange}

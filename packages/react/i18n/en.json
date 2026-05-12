@@ -127,6 +127,13 @@
   "zoom": {
     "ariaLabel": "Zoom: {label}"
   },
+  "pageView": {
+    "ariaLabel": "Page view: {label}",
+    "title": "Page view: {label}",
+    "onePage": "One Page",
+    "multiplePages": "Multiple Pages",
+    "pageWidth": "Page Width"
+  },
   "colorPicker": {
     "ariaLabel": "{type} color picker",
     "highlightColors": "Highlight Colors",

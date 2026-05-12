@@ -210,8 +210,84 @@ function findPaintedPmStartAtOrBefore(pages: HTMLElement, pmPos: number): number
   return best;
 }
 
+export type PageViewMode = 'onePage' | 'multiplePages' | 'pageWidth';
+type PageArrangement = 'column' | 'wrapped';
+
+interface PageVisualOffset {
+  left: number;
+  top: number;
+}
+
+function getPageArrangement(pageViewMode: PageViewMode): PageArrangement {
+  return pageViewMode === 'multiplePages' ? 'wrapped' : 'column';
+}
+
+function computePageVisualOffsets(
+  layout: Layout,
+  pageGap: number,
+  pageArrangement: PageArrangement,
+  viewportWidth: number
+): PageVisualOffset[] {
+  if (pageArrangement === 'column') {
+    let top = 0;
+    return layout.pages.map((page, index) => {
+      const offset = { left: 0, top };
+      top += page.size.h + (index < layout.pages.length - 1 ? pageGap : 0);
+      return offset;
+    });
+  }
+
+  const availableWidth = Math.max(1, viewportWidth - pageGap * 2);
+  const offsets: PageVisualOffset[] = new Array(layout.pages.length);
+  let rowStart = 0;
+  let rowWidth = 0;
+  let rowHeight = 0;
+  let rowTop = 0;
+
+  const flushRow = (exclusiveEnd: number) => {
+    if (exclusiveEnd <= rowStart) return;
+    let left = Math.max(0, (availableWidth - rowWidth) / 2);
+    for (let i = rowStart; i < exclusiveEnd; i++) {
+      const page = layout.pages[i];
+      offsets[i] = { left, top: rowTop };
+      left += page.size.w + pageGap;
+    }
+    rowTop += rowHeight + pageGap;
+    rowStart = exclusiveEnd;
+    rowWidth = 0;
+    rowHeight = 0;
+  };
+
+  for (let i = 0; i < layout.pages.length; i++) {
+    const page = layout.pages[i];
+    const nextWidth = rowWidth === 0 ? page.size.w : rowWidth + pageGap + page.size.w;
+    if (rowWidth > 0 && nextWidth > availableWidth) {
+      flushRow(i);
+    }
+    rowWidth = rowWidth === 0 ? page.size.w : rowWidth + pageGap + page.size.w;
+    rowHeight = Math.max(rowHeight, page.size.h);
+  }
+  flushRow(layout.pages.length);
+
+  return offsets;
+}
+
 /** Min-height of the zoom/viewport wrapper (padding + page stack). Must match JSX `totalHeight`. */
-function viewportMinHeightPx(layout: Layout, pageGap: number): number {
+function viewportMinHeightPx(
+  layout: Layout,
+  pageGap: number,
+  pageArrangement: PageArrangement,
+  viewportWidth: number
+): number {
+  if (pageArrangement === 'wrapped') {
+    const offsets = computePageVisualOffsets(layout, pageGap, pageArrangement, viewportWidth);
+    const pagesHeight = layout.pages.reduce((maxBottom, page, index) => {
+      const offset = offsets[index] ?? { top: 0, left: 0 };
+      return Math.max(maxBottom, offset.top + page.size.h);
+    }, 0);
+    return pagesHeight + VIEWPORT_PADDING_TOP + pageGap * 2 + 24;
+  }
+
   const n = layout.pages.length;
   const pagesHeight = layout.pages.reduce((sum, page) => sum + page.size.h, 0);
   return pagesHeight + Math.max(0, n - 1) * pageGap + VIEWPORT_PADDING_TOP + 24;
@@ -246,6 +322,8 @@ export interface PagedEditorProps {
   pageGap?: number;
   /** Zoom level (1 = 100%). */
   zoom?: number;
+  /** Page viewing mode for the visible canvas. */
+  pageViewMode?: PageViewMode;
   /** Callback when document changes. */
   onDocumentChange?: (document: Document) => void;
   /** Callback when selection changes. */
@@ -435,7 +513,8 @@ function computeAnchorPositions(
   layout: Layout,
   blocks: FlowBlock[],
   measures: Measure[],
-  renderedPageGap: number
+  renderedPageGap: number,
+  pageVisualOffsets?: PageVisualOffset[]
 ): Map<string, number> {
   const positions = new Map<string, number>();
   if (!pmView?.state) return positions;
@@ -469,7 +548,9 @@ function computeAnchorPositions(
       // Try exact position (paragraphs/images)
       const caret = getCaretPosition(layout, blocks, measures, pos);
       if (caret) {
-        positions.set(key, caret.y + contentOffset);
+        const layoutPageTop = getPageTop(layout, caret.pageIndex);
+        const visualPageTop = pageVisualOffsets?.[caret.pageIndex]?.top ?? layoutPageTop;
+        positions.set(key, caret.y - layoutPageTop + visualPageTop + contentOffset);
         continue;
       }
 
@@ -484,7 +565,8 @@ function computeAnchorPositions(
 
           const rowOffsetY =
             frag.kind === 'table' ? getTableRowOffset(blocks, measures, frag, pos) : 0;
-          positions.set(key, frag.y + rowOffsetY + getPageTop(layout, pi) + contentOffset);
+          const visualPageTop = pageVisualOffsets?.[pi]?.top ?? getPageTop(layout, pi);
+          positions.set(key, frag.y + rowOffsetY + visualPageTop + contentOffset);
           found = true;
           break;
         }
@@ -1232,6 +1314,7 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
       readOnly = false,
       pageGap = DEFAULT_PAGE_GAP,
       zoom = 1,
+      pageViewMode = 'onePage',
       onDocumentChange,
       onSelectionChange,
       externalPlugins = EMPTY_PLUGINS,
@@ -1253,6 +1336,7 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
       onTotalPagesChange,
       resolvedCommentIds,
     } = props;
+    const pageArrangement = getPageArrangement(pageViewMode);
 
     // Resolve the scroll container: prefer parent-provided ref, fallback to own container
     const getScrollContainer = useCallback((): HTMLDivElement | null => {
@@ -1306,6 +1390,7 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
 
     // State
     const [layout, setLayout] = useState<Layout | null>(null);
+    const [viewportWidth, setViewportWidth] = useState(0);
     const lastTotalPagesRef = useRef<number>(0);
     const onTotalPagesChangeRef = useRef(onTotalPagesChange);
     onTotalPagesChangeRef.current = onTotalPagesChange;
@@ -1323,6 +1408,20 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
     const [isFocused, setIsFocused] = useState(false);
     const [selectionRects, setSelectionRects] = useState<SelectionRect[]>([]);
     const [caretPosition, setCaretPosition] = useState<CaretPosition | null>(null);
+
+    useLayoutEffect(() => {
+      const container = containerRef.current;
+      if (!container) return;
+
+      const updateViewportWidth = () => {
+        setViewportWidth(container.clientWidth);
+      };
+      updateViewportWidth();
+
+      const observer = new ResizeObserver(updateViewportWidth);
+      observer.observe(container);
+      return () => observer.disconnect();
+    }, []);
 
     // Image selection state
     const [selectedImageInfo, setSelectedImageInfo] = useState<ImageSelectionInfo | null>(null);
@@ -1761,6 +1860,7 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
               theme: _theme,
               footnotesByPage: footnotesByPage?.size ? footnotesByPage : undefined,
               resolvedCommentIds,
+              pageArrangement,
             } as RenderPageOptions & {
               pageGap?: number;
               blockLookup?: BlockLookup;
@@ -1769,7 +1869,7 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
 
             const vp = viewportLayoutRef.current;
             if (vp) {
-              const mh = viewportMinHeightPx(newLayout, pageGap);
+              const mh = viewportMinHeightPx(newLayout, pageGap, pageArrangement, viewportWidth);
               vp.style.minHeight = `${mh}px`;
               if (zoom !== 1) {
                 vp.style.marginBottom = `${mh * (zoom - 1)}px`;
@@ -1816,12 +1916,19 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
           // Compute anchor Y positions for comments sidebar (works without DOM queries).
           // Only runs when the sidebar callback is registered.
           if (onAnchorPositionsChange) {
+            const pageVisualOffsets = computePageVisualOffsets(
+              newLayout,
+              pageGap,
+              pageArrangement,
+              viewportWidth
+            );
             const positions = computeAnchorPositions(
               hiddenPMRef.current?.getView() ?? null,
               newLayout,
               newBlocks,
               newMeasures,
-              pageGap
+              pageGap,
+              pageVisualOffsets
             );
             onAnchorPositionsChange(positions);
           }
@@ -1864,6 +1971,8 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
         document,
         resolvedCommentIds,
         getScrollContainer,
+        pageArrangement,
+        viewportWidth,
       ]
     );
 
@@ -2143,19 +2252,27 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
             const overlay = pagesContainerRef.current?.parentElement?.querySelector(
               '[data-testid="selection-overlay"]'
             );
-            const firstPage = pagesContainerRef.current?.querySelector('.layout-page');
 
-            if (overlay && firstPage) {
+            if (overlay && pagesContainerRef.current) {
               const overlayRect = overlay.getBoundingClientRect();
-              const pageRect = firstPage.getBoundingClientRect();
               const caret = getCaretPosition(layout, blocks, measures, from);
 
               if (caret) {
-                setCaretPosition({
-                  ...caret,
-                  x: caret.x + (pageRect.left - overlayRect.left) / zoom,
-                  y: caret.y + (pageRect.top - overlayRect.top) / zoom,
-                });
+                const pageEl =
+                  pagesContainerRef.current.querySelectorAll<HTMLElement>('.layout-page')[
+                    caret.pageIndex
+                  ];
+                if (!pageEl) {
+                  setCaretPosition(null);
+                } else {
+                  const pageRect = pageEl.getBoundingClientRect();
+                  const layoutPageTop = getPageTop(layout, caret.pageIndex);
+                  setCaretPosition({
+                    ...caret,
+                    x: caret.x + (pageRect.left - overlayRect.left) / zoom,
+                    y: caret.y - layoutPageTop + (pageRect.top - overlayRect.top) / zoom,
+                  });
+                }
               } else {
                 setCaretPosition(null);
               }
@@ -2248,18 +2365,25 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
               setSelectionRects(domRects);
             } else {
               // Fallback to layout-based calculation
-              const firstPage = pagesContainerRef.current.querySelector('.layout-page');
-              if (firstPage) {
-                const pageRect = firstPage.getBoundingClientRect();
-                const pageOffsetX = (pageRect.left - overlayRect.left) / zoom;
-                const pageOffsetY = (pageRect.top - overlayRect.top) / zoom;
-
+              const pageEls =
+                pagesContainerRef.current.querySelectorAll<HTMLElement>('.layout-page');
+              if (pageEls.length > 0) {
                 const rects = selectionToRects(layout, blocks, measures, from, to);
-                const adjustedRects = rects.map((rect) => ({
-                  ...rect,
-                  x: rect.x + pageOffsetX,
-                  y: rect.y + pageOffsetY,
-                }));
+                const adjustedRects = rects.flatMap((rect) => {
+                  const pageEl = pageEls[rect.pageIndex];
+                  if (!pageEl) return [];
+                  const pageRect = pageEl.getBoundingClientRect();
+                  const pageOffsetX = (pageRect.left - overlayRect.left) / zoom;
+                  const pageOffsetY = (pageRect.top - overlayRect.top) / zoom;
+                  const layoutPageTop = getPageTop(layout, rect.pageIndex);
+                  return [
+                    {
+                      ...rect,
+                      x: rect.x + pageOffsetX,
+                      y: rect.y - layoutPageTop + pageOffsetY,
+                    },
+                  ];
+                });
                 setSelectionRects(adjustedRects);
               } else {
                 setSelectionRects([]);
@@ -3884,6 +4008,45 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
       runLayoutPipeline,
     ]);
 
+    const previousPageArrangementRef = useRef(pageArrangement);
+    useEffect(() => {
+      if (previousPageArrangementRef.current === pageArrangement) return;
+      previousPageArrangementRef.current = pageArrangement;
+
+      const state = hiddenPMRef.current?.getState();
+      if (state) {
+        runLayoutPipeline(state);
+        updateSelectionOverlay(state);
+      }
+    }, [pageArrangement, runLayoutPipeline, updateSelectionOverlay]);
+
+    useEffect(() => {
+      if (!onAnchorPositionsChange || !layout) return;
+      const pageVisualOffsets = computePageVisualOffsets(
+        layout,
+        pageGap,
+        pageArrangement,
+        viewportWidth
+      );
+      const positions = computeAnchorPositions(
+        hiddenPMRef.current?.getView() ?? null,
+        layout,
+        blocks,
+        measures,
+        pageGap,
+        pageVisualOffsets
+      );
+      onAnchorPositionsChange(positions);
+    }, [
+      blocks,
+      layout,
+      measures,
+      onAnchorPositionsChange,
+      pageArrangement,
+      pageGap,
+      viewportWidth,
+    ]);
+
     // Re-compute selection overlay when the container resizes.
     // Page elements shift during window resize (centering, scrollbar changes),
     // causing caret/selection coordinates to become stale.
@@ -4011,10 +4174,21 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
     // Calculate total height for scroll
     const totalHeight = useMemo(() => {
       if (!layout) return DEFAULT_PAGE_HEIGHT + 48;
-      const numPages = layout.pages.length;
-      const pagesHeight = layout.pages.reduce((sum, page) => sum + page.size.h, 0);
-      return pagesHeight + (numPages - 1) * pageGap + 48;
-    }, [layout, pageGap]);
+      return viewportMinHeightPx(layout, pageGap, pageArrangement, viewportWidth);
+    }, [layout, pageArrangement, pageGap, viewportWidth]);
+    const renderedPagesContainerStyles = useMemo<CSSProperties>(() => {
+      const isWrapped = pageArrangement === 'wrapped';
+      return {
+        ...pagesContainerStyles,
+        flexDirection: isWrapped ? 'row' : 'column',
+        flexWrap: isWrapped ? 'wrap' : 'nowrap',
+        justifyContent: isWrapped ? 'center' : undefined,
+        alignItems: isWrapped ? 'flex-start' : 'center',
+        alignContent: isWrapped ? 'flex-start' : undefined,
+        width: '100%',
+        boxSizing: 'border-box',
+      };
+    }, [pageArrangement]);
 
     return (
       <div
@@ -4068,7 +4242,7 @@ const PagedEditorComponent = forwardRef<PagedEditorRef, PagedEditorProps>(
           <div
             ref={pagesContainerRef}
             className={`paged-editor__pages${readOnly ? ' paged-editor--readonly' : ''}${hfEditMode ? ` paged-editor--hf-editing paged-editor--editing-${hfEditMode}` : ''}`}
-            style={pagesContainerStyles}
+            style={renderedPagesContainerStyles}
             onMouseDown={handlePagesMouseDown}
             onMouseMove={handlePagesMouseMove}
             onClick={handlePagesClick}
