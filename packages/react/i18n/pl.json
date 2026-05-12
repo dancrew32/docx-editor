@@ -127,6 +127,13 @@
   "zoom": {
     "ariaLabel": "Powiększenie: {label}"
   },
+  "pageView": {
+    "ariaLabel": null,
+    "title": null,
+    "onePage": null,
+    "multiplePages": null,
+    "pageWidth": null
+  },
   "colorPicker": {
     "ariaLabel": "Próbnik kolorów — {type}",
     "highlightColors": "Kolory wyróżnienia",

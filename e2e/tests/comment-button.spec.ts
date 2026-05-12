@@ -10,6 +10,7 @@ import { test, expect } from '@playwright/test';
 import { EditorPage } from '../helpers/editor-page';
 
 const DEMO_DOCX_PATH = 'fixtures/demo/demo.docx';
+const MULTI_PAGE_DOCX_PATH = 'fixtures/issue-68-large.docx';
 
 /**
  * Find the floating comment button (position:absolute, z-index:50) and return its
@@ -37,12 +38,12 @@ async function findCommentButton(page: import('@playwright/test').Page) {
 }
 
 /** Right edge of the first visible page element, in viewport coordinates. */
-async function getPageRightEdge(page: import('@playwright/test').Page) {
-  return page.evaluate(() => {
-    const pageEl = document.querySelector('.layout-page') as HTMLElement | null;
+async function getPageRightEdge(page: import('@playwright/test').Page, pageIndex = 0) {
+  return page.evaluate((index) => {
+    const pageEl = document.querySelectorAll<HTMLElement>('.layout-page')[index] ?? null;
     if (!pageEl) return null;
     return pageEl.getBoundingClientRect().right;
-  });
+  }, pageIndex);
 }
 
 /**
@@ -60,6 +61,58 @@ async function findTextSpanY(page: import('@playwright/test').Page, text: string
     }
     return null;
   }, text);
+}
+
+async function selectPageViewMode(
+  page: import('@playwright/test').Page,
+  mode: 'onePage' | 'multiplePages' | 'pageWidth'
+) {
+  await page.getByTestId('page-view-mode-control').click();
+  await page.getByTestId(`page-view-mode-${mode}`).click();
+}
+
+async function selectZoomLevel(page: import('@playwright/test').Page, level: number) {
+  await page.getByTestId('zoom-control').click();
+  await page.getByTestId(`zoom-level-${level}`).click();
+}
+
+async function dragSelectTextOnRenderedPage(
+  page: import('@playwright/test').Page,
+  pageIndex: number
+) {
+  const target = await page.evaluate((index) => {
+    const pageEl = document.querySelectorAll<HTMLElement>('.layout-page')[index] ?? null;
+    if (!pageEl) return null;
+    const spans = Array.from(
+      pageEl.querySelectorAll<HTMLElement>('span[data-pm-start][data-pm-end]')
+    );
+    for (const span of spans) {
+      if ((span.textContent?.trim().length ?? 0) < 4) continue;
+      const rect = span.getBoundingClientRect();
+      if (rect.width < 30 || rect.height <= 0) continue;
+      return {
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        height: rect.height,
+        width: rect.width,
+      };
+    }
+    return null;
+  }, pageIndex);
+
+  expect(target, `text span should exist on rendered page ${pageIndex + 1}`).not.toBeNull();
+  const y = target!.top + target!.height / 2;
+  await page.mouse.move(target!.left + 2, y);
+  await page.mouse.down();
+  await page.mouse.move(
+    Math.min(target!.right - 2, target!.left + Math.max(24, target!.width / 2)),
+    y,
+    {
+      steps: 6,
+    }
+  );
+  await page.mouse.up();
 }
 
 test.describe('Comment Button - Scroll Position (#185)', () => {
@@ -204,5 +257,48 @@ test.describe('Comment Button - Geometry changes (#268 dedup)', () => {
         `button drifted from page edge at width ${width}: ${btn!.centerX} vs ${pageRight}`
       ).toBeLessThan(20);
     }
+  });
+});
+
+test.describe('Comment Button - Multiple Pages geometry', () => {
+  test('floating button anchors to page 2 right edge in a wrapped row', async ({ page }) => {
+    await page.setViewportSize({ width: 1320, height: 1000 });
+    const editor = new EditorPage(page);
+    await editor.goto();
+    await editor.waitForReady();
+    await editor.loadDocxFile(MULTI_PAGE_DOCX_PATH);
+    await page.waitForFunction(() => (window.__DOCX_EDITOR_E2E__?.getTotalPages() ?? 0) > 1, {
+      timeout: 10000,
+    });
+
+    await selectPageViewMode(page, 'multiplePages');
+    await selectZoomLevel(page, 50);
+    await page.waitForFunction(() => {
+      const pages = Array.from(document.querySelectorAll<HTMLElement>('.layout-page'));
+      if (pages.length < 2) return false;
+      const first = pages[0].getBoundingClientRect();
+      const second = pages[1].getBoundingClientRect();
+      return Math.abs(first.top - second.top) < 8 && second.left > first.right;
+    });
+
+    await dragSelectTextOnRenderedPage(page, 1);
+    await page.waitForFunction(() => {
+      const buttons = document.querySelectorAll('[data-testid="docx-editor"] button');
+      for (const btn of buttons) {
+        const style = getComputedStyle(btn);
+        if (style.position === 'absolute' && style.zIndex === '50') return true;
+      }
+      return false;
+    });
+
+    const btn = await findCommentButton(page);
+    const page1Right = await getPageRightEdge(page, 0);
+    const page2Right = await getPageRightEdge(page, 1);
+    expect(btn).not.toBeNull();
+    expect(page1Right).not.toBeNull();
+    expect(page2Right).not.toBeNull();
+
+    expect(Math.abs(btn!.centerX - page2Right!)).toBeLessThan(20);
+    expect(Math.abs(btn!.centerX - page1Right!)).toBeGreaterThan(40);
   });
 });

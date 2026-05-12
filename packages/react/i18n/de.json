@@ -127,6 +127,13 @@
   "zoom": {
     "ariaLabel": "Zoom: {label}"
   },
+  "pageView": {
+    "ariaLabel": null,
+    "title": null,
+    "onePage": null,
+    "multiplePages": null,
+    "pageWidth": null
+  },
   "colorPicker": {
     "ariaLabel": "Farbauswahl — {type}",
     "highlightColors": "Hervorhebungsfarben",

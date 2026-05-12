@@ -20,6 +20,7 @@ import { LineSpacingPicker } from './ui/LineSpacingPicker';
 import { StylePicker } from './ui/StylePicker';
 import { MaterialSymbol } from './ui/MaterialSymbol';
 import { ZoomControl } from './ui/ZoomControl';
+import { PageViewModeControl } from './ui/PageViewModeControl';
 import { TableBorderPicker } from './ui/TableBorderPicker';
 import { TableBorderColorPicker } from './ui/TableBorderColorPicker';
 import { TableBorderWidthPicker } from './ui/TableBorderWidthPicker';
@@ -99,6 +100,9 @@ export function FormattingBar(explicitProps: FormattingBarProps) {
     showZoomControl = true,
     zoom,
     onZoomChange,
+    showPageViewModeControl = true,
+    documentViewMode = 'onePage',
+    onDocumentViewModeChange,
     onRefocusEditor,
     imageContext,
     onImageWrapType,
@@ -380,18 +384,28 @@ export function FormattingBar(explicitProps: FormattingBarProps) {
         </ToolbarButton>
       </ToolbarGroup>
 
-      {/* Zoom Control */}
-      {showZoomControl && (
+      {/* Zoom and page view controls */}
+      {(showZoomControl || showPageViewModeControl) && (
         <ToolbarGroup label={t('formattingBar.groups.zoom')}>
-          <ZoomControl
-            value={zoom}
-            onChange={onZoomChange}
-            minZoom={0.5}
-            maxZoom={2}
-            disabled={disabled}
-            compact
-            showButtons={false}
-          />
+          {showZoomControl && (
+            <ZoomControl
+              value={zoom}
+              onChange={onZoomChange}
+              minZoom={0.5}
+              maxZoom={2}
+              disabled={disabled}
+              compact
+              showButtons={false}
+            />
+          )}
+          {showPageViewModeControl && (
+            <PageViewModeControl
+              value={documentViewMode}
+              onChange={onDocumentViewModeChange}
+              onRefocusEditor={onRefocusEditor}
+              disabled={disabled}
+            />
+          )}
         </ToolbarGroup>
       )}
 

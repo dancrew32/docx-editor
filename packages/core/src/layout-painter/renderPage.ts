@@ -37,6 +37,7 @@ import type { Theme } from '../types/document';
 import { measureParagraph, type FloatingImageZone } from '../layout-bridge/measuring';
 import { resolveFontFamily } from '../utils/fontResolver';
 import { isFloatingWrapType, isWrapNone, wrapsAroundText } from '../docx/wrapTypes';
+import { pointsToPixels } from '../utils/units';
 
 /**
  * Page-level floating image that has been extracted from paragraphs.
@@ -217,7 +218,9 @@ export interface RenderPageOptions {
     bottom?: BorderSpec;
     left?: BorderSpec;
     right?: BorderSpec;
+    display?: 'allPages' | 'firstPage' | 'notFirstPage';
     offsetFrom?: 'page' | 'text';
+    zOrder?: 'front' | 'back';
   };
   /** Theme for resolving border colors. */
   theme?: Theme | null;
@@ -225,6 +228,10 @@ export interface RenderPageOptions {
   footnoteArea?: FootnoteRenderItem[];
   /** Comment IDs that are resolved — skip highlight for these */
   resolvedCommentIds?: Set<number>;
+  /** Arrangement for the page container when rendering multiple pages. */
+  pageArrangement?: 'column' | 'wrapped';
+  /** Current visual page scale used by the outer viewport transform. */
+  pageScale?: number;
 }
 
 export interface HeaderFooterLayoutInfo {
@@ -271,23 +278,95 @@ function applyPageStyles(
   if (options.showShadow) {
     element.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.15)';
   }
+}
 
-  // Apply OOXML page borders
-  if (options.pageBorders) {
-    const pb = options.pageBorders;
-    const sides = ['top', 'bottom', 'left', 'right'] as const;
-    const cssSides = ['Top', 'Bottom', 'Left', 'Right'] as const;
+function pageBorderShouldRender(
+  pageNumber: number,
+  display?: 'allPages' | 'firstPage' | 'notFirstPage'
+): boolean {
+  switch (display ?? 'allPages') {
+    case 'firstPage':
+      return pageNumber === 1;
+    case 'notFirstPage':
+      return pageNumber !== 1;
+    case 'allPages':
+    default:
+      return true;
+  }
+}
 
-    for (let i = 0; i < sides.length; i++) {
-      const border = pb[sides[i]];
-      if (border && border.style !== 'none' && border.style !== 'nil') {
-        const styles = borderToStyle(border, cssSides[i], options.theme);
-        for (const [key, value] of Object.entries(styles)) {
-          (element.style as unknown as Record<string, string>)[key] = String(value);
-        }
-      }
+function pageBorderSpacePx(border: BorderSpec | undefined): number {
+  return border?.space !== undefined ? pointsToPixels(border.space) : 0;
+}
+
+function applyPageBorderSide(
+  element: HTMLElement,
+  border: BorderSpec | undefined,
+  side: 'Top' | 'Bottom' | 'Left' | 'Right',
+  theme?: Theme | null
+): void {
+  if (!border || border.style === 'none' || border.style === 'nil') return;
+
+  const styles = borderToStyle(border, side, theme);
+  for (const [key, value] of Object.entries(styles)) {
+    (element.style as unknown as Record<string, string>)[key] = String(value);
+  }
+
+  const styleKey = `border${side}Style`;
+  const widthKey = `border${side}Width`;
+  const styleValue = (element.style as unknown as Record<string, string>)[styleKey];
+  if (styleValue === 'double') {
+    const widthValue = parseFloat((element.style as unknown as Record<string, string>)[widthKey]);
+    if (!Number.isFinite(widthValue) || widthValue < 3) {
+      (element.style as unknown as Record<string, string>)[widthKey] = '3px';
     }
   }
+}
+
+function renderPageBorderOverlay(
+  page: Page,
+  options: RenderPageOptions,
+  doc: Document
+): HTMLElement | null {
+  const pb = options.pageBorders;
+  if (!pb || !pageBorderShouldRender(page.number, pb.display)) return null;
+
+  const hasBorder = [pb.top, pb.bottom, pb.left, pb.right].some(
+    (border) => border && border.style !== 'none' && border.style !== 'nil'
+  );
+  if (!hasBorder) return null;
+
+  const offsetFrom = pb.offsetFrom ?? 'text';
+  const topOffset = pageBorderSpacePx(pb.top);
+  const rightOffset = pageBorderSpacePx(pb.right);
+  const bottomOffset = pageBorderSpacePx(pb.bottom);
+  const leftOffset = pageBorderSpacePx(pb.left);
+
+  const overlay = doc.createElement('div');
+  overlay.className = 'layout-page-border';
+  overlay.style.position = 'absolute';
+  overlay.style.pointerEvents = 'none';
+  overlay.style.boxSizing = 'border-box';
+  overlay.style.zIndex = pb.zOrder === 'back' ? '0' : '20';
+
+  if (offsetFrom === 'page') {
+    overlay.style.top = `${topOffset}px`;
+    overlay.style.right = `${rightOffset}px`;
+    overlay.style.bottom = `${bottomOffset}px`;
+    overlay.style.left = `${leftOffset}px`;
+  } else {
+    overlay.style.top = `${Math.max(0, page.margins.top - topOffset)}px`;
+    overlay.style.right = `${Math.max(0, page.margins.right - rightOffset)}px`;
+    overlay.style.bottom = `${Math.max(0, page.margins.bottom - bottomOffset)}px`;
+    overlay.style.left = `${Math.max(0, page.margins.left - leftOffset)}px`;
+  }
+
+  applyPageBorderSide(overlay, pb.top, 'Top', options.theme);
+  applyPageBorderSide(overlay, pb.bottom, 'Bottom', options.theme);
+  applyPageBorderSide(overlay, pb.left, 'Left', options.theme);
+  applyPageBorderSide(overlay, pb.right, 'Right', options.theme);
+
+  return overlay;
 }
 
 /**
@@ -1149,6 +1228,10 @@ export function renderPage(
   pageEl.dataset.pageNumber = String(page.number);
 
   applyPageStyles(pageEl, page.size.w, page.size.h, options);
+  const pageBorderEl = renderPageBorderOverlay(page, options, doc);
+  if (pageBorderEl && options.pageBorders?.zOrder === 'back') {
+    pageEl.appendChild(pageBorderEl);
+  }
 
   // Create content area
   const contentEl = doc.createElement('div');
@@ -1530,6 +1613,10 @@ export function renderPage(
     pageEl.appendChild(footerEl);
   }
 
+  if (pageBorderEl && options.pageBorders?.zOrder !== 'back') {
+    pageEl.appendChild(pageBorderEl);
+  }
+
   return pageEl;
 }
 
@@ -1677,6 +1764,7 @@ function computeOptionsHash(options: RenderPageOptions): string {
   // Header/footer distances
   if (options.headerDistance !== undefined) parts.push(`hd:${options.headerDistance}`);
   if (options.footerDistance !== undefined) parts.push(`fd:${options.footerDistance}`);
+  if (options.pageArrangement) parts.push(`pa:${options.pageArrangement}`);
 
   return parts.join('|');
 }
@@ -1684,12 +1772,24 @@ function computeOptionsHash(options: RenderPageOptions): string {
 /**
  * Apply standard container styles for the pages wrapper.
  */
-function applyContainerStyles(container: HTMLElement, pageGap: number): void {
+function applyContainerStyles(
+  container: HTMLElement,
+  pageGap: number,
+  pageArrangement: 'column' | 'wrapped' = 'column',
+  pageScale = 1
+): void {
+  const isWrapped = pageArrangement === 'wrapped';
+  const effectiveScale = Math.max(pageScale, 0.01);
   container.style.display = 'flex';
-  container.style.flexDirection = 'column';
-  container.style.alignItems = 'center';
+  container.style.flexDirection = isWrapped ? 'row' : 'column';
+  container.style.flexWrap = isWrapped ? 'wrap' : 'nowrap';
+  container.style.justifyContent = isWrapped ? 'center' : '';
+  container.style.alignItems = isWrapped ? 'flex-start' : 'center';
+  container.style.alignContent = isWrapped ? 'flex-start' : '';
   container.style.gap = `${pageGap}px`;
   container.style.padding = `${pageGap}px`;
+  container.style.width = isWrapped ? `${100 / effectiveScale}%` : '100%';
+  container.style.boxSizing = 'border-box';
   container.style.backgroundColor = 'var(--doc-bg, #f8f9fa)';
 }
 
@@ -1732,6 +1832,8 @@ export function renderPages(
   const prevState = pc.__pageRenderState;
   const currentOptionsHash = computeOptionsHash(options);
   const useVirtualization = totalPages >= VIRTUALIZATION_THRESHOLD;
+
+  applyContainerStyles(container, pageGap, options.pageArrangement, options.pageScale ?? 1);
 
   // Determine if we can do an incremental update
   const canIncremental =
@@ -1852,8 +1954,6 @@ export function renderPages(
   // Clear existing content
   container.innerHTML = '';
   pc.__pageRenderState = undefined;
-
-  applyContainerStyles(container, pageGap);
 
   // Build all page shells
   const pageShells: HTMLElement[] = [];
