@@ -45,7 +45,7 @@ import {
   OUTLINE_BUTTON_RESERVED_SPACE,
   OUTLINE_RESERVED_SPACE,
 } from './DocumentOutline';
-import { SIDEBAR_DOCUMENT_SHIFT } from './sidebar/constants';
+import { SIDEBAR_DOCUMENT_SHIFT, SIDEBAR_PAGE_GAP } from './sidebar/constants';
 import { UnifiedSidebar } from './UnifiedSidebar';
 import { AgentPanel } from './AgentPanel';
 import { CommentMarginMarkers } from './CommentMarginMarkers';
@@ -1083,18 +1083,52 @@ function injectTCReplyRangeMarkers(content: BlockContent[], comments: Comment[])
 }
 
 const EMPTY_ANCHOR_POSITIONS = new Map<string, number>();
+const EMPTY_COMMENT_RAIL_LEFTS = new Map<number, number>();
 
-/**
- * Find the Y position (relative to parentEl) of the element containing the given PM position.
- * Used by both the floating comment button and the context menu comment action.
- * Queries all elements with data-pm-start (spans, divs, imgs) — not just spans,
- * since table cell content may use div fragments.
- */
-function findSelectionYPosition(
+interface VisiblePageGeometry {
+  pageNumber: number;
+  pageIndex: number;
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+  width: number;
+  height: number;
+  contentLeft: number;
+}
+
+interface SelectionAnchorGeometry {
+  top: number;
+  page: VisiblePageGeometry;
+}
+
+function pageGeometryFromElement(
+  pageEl: HTMLElement,
+  scrollContainer: HTMLElement,
+  parentEl: HTMLElement
+): VisiblePageGeometry {
+  const pageRect = pageEl.getBoundingClientRect();
+  const parentRect = parentEl.getBoundingClientRect();
+  const scrollRect = scrollContainer.getBoundingClientRect();
+  const pageNumber = Number(pageEl.dataset.pageNumber) || 1;
+  return {
+    pageNumber,
+    pageIndex: Math.max(0, pageNumber - 1),
+    left: pageRect.left - parentRect.left,
+    right: pageRect.right - parentRect.left,
+    top: pageRect.top - parentRect.top,
+    bottom: pageRect.bottom - parentRect.top,
+    width: pageRect.width,
+    height: pageRect.height,
+    contentLeft: pageRect.left - scrollRect.left + scrollContainer.scrollLeft,
+  };
+}
+
+function pageGeometryForPmPosition(
   scrollContainer: HTMLElement | null,
   parentEl: HTMLElement | null,
   pmPos: number
-): number | null {
+): VisiblePageGeometry | null {
   if (!scrollContainer || !parentEl) return null;
   const pagesEl = scrollContainer.querySelector('.paged-editor__pages');
   if (!pagesEl) return null;
@@ -1102,7 +1136,150 @@ function findSelectionYPosition(
     const pmStart = Number(el.dataset.pmStart);
     const pmEnd = Number(el.dataset.pmEnd);
     if (pmPos >= pmStart && pmPos <= pmEnd) {
-      return el.getBoundingClientRect().top - parentEl.getBoundingClientRect().top;
+      const pageEl = el.closest('.layout-page') as HTMLElement | null;
+      return pageEl ? pageGeometryFromElement(pageEl, scrollContainer, parentEl) : null;
+    }
+  }
+  return null;
+}
+
+function bestVisiblePageGeometry(
+  scrollContainer: HTMLElement | null,
+  parentEl: HTMLElement | null
+): VisiblePageGeometry | null {
+  if (!scrollContainer || !parentEl) return null;
+  const pages = Array.from(
+    scrollContainer.querySelectorAll<HTMLElement>('.paged-editor__pages .layout-page')
+  );
+  if (pages.length === 0) return null;
+
+  const viewportRect = scrollContainer.getBoundingClientRect();
+  let bestPage: HTMLElement | null = null;
+  let bestVisibleTop = Number.POSITIVE_INFINITY;
+  let bestLeft = Number.POSITIVE_INFINITY;
+  let bestVisibleArea = -1;
+  const geometryTolerance = 0.5;
+
+  for (const page of pages) {
+    const pageRect = page.getBoundingClientRect();
+    const visibleWidth = Math.max(
+      0,
+      Math.min(pageRect.right, viewportRect.right) - Math.max(pageRect.left, viewportRect.left)
+    );
+    const visibleHeight = Math.max(
+      0,
+      Math.min(pageRect.bottom, viewportRect.bottom) - Math.max(pageRect.top, viewportRect.top)
+    );
+    const visibleArea = visibleWidth * visibleHeight;
+    if (visibleArea <= 0) continue;
+    const visibleTop = Math.max(pageRect.top, viewportRect.top);
+    const left = pageRect.left;
+
+    if (
+      visibleTop < bestVisibleTop - geometryTolerance ||
+      (Math.abs(visibleTop - bestVisibleTop) <= geometryTolerance &&
+        left < bestLeft - geometryTolerance) ||
+      (Math.abs(visibleTop - bestVisibleTop) <= geometryTolerance &&
+        Math.abs(left - bestLeft) <= geometryTolerance &&
+        visibleArea > bestVisibleArea)
+    ) {
+      bestPage = page;
+      bestVisibleTop = visibleTop;
+      bestLeft = left;
+      bestVisibleArea = visibleArea;
+    }
+  }
+
+  return bestPage ? pageGeometryFromElement(bestPage, scrollContainer, parentEl) : null;
+}
+
+function collectCommentRailLefts(
+  scrollContainer: HTMLElement | null,
+  parentEl: HTMLElement | null
+): Map<number, number> {
+  if (!scrollContainer || !parentEl) return EMPTY_COMMENT_RAIL_LEFTS;
+  const pagesEl = scrollContainer.querySelector('.paged-editor__pages');
+  if (!pagesEl) return EMPTY_COMMENT_RAIL_LEFTS;
+  const rails = new Map<number, number>();
+  for (const el of pagesEl.querySelectorAll<HTMLElement>('[data-comment-id]')) {
+    const commentId = Number(el.dataset.commentId);
+    if (Number.isNaN(commentId) || rails.has(commentId)) continue;
+    const pageEl = el.closest('.layout-page') as HTMLElement | null;
+    if (!pageEl) continue;
+    const page = pageGeometryFromElement(pageEl, scrollContainer, parentEl);
+    rails.set(commentId, page.right + 6);
+  }
+  return rails.size > 0 ? rails : EMPTY_COMMENT_RAIL_LEFTS;
+}
+
+function visiblePageGeometryEqual(
+  a: VisiblePageGeometry | null,
+  b: VisiblePageGeometry | null
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.pageNumber === b.pageNumber &&
+    Math.abs(a.left - b.left) < 0.5 &&
+    Math.abs(a.right - b.right) < 0.5 &&
+    Math.abs(a.top - b.top) < 0.5 &&
+    Math.abs(a.width - b.width) < 0.5 &&
+    Math.abs(a.contentLeft - b.contentLeft) < 0.5
+  );
+}
+
+function railLeftsEqual(a: Map<number, number>, b: Map<number, number>): boolean {
+  if (a === b) return true;
+  if (a.size !== b.size) return false;
+  for (const [key, value] of a) {
+    const other = b.get(key);
+    if (other == null || Math.abs(other - value) >= 0.5) return false;
+  }
+  return true;
+}
+
+function sectionPropsFromVisiblePage(
+  page: {
+    size: { w: number; h: number };
+    margins: { top: number; right: number; bottom: number; left: number };
+  },
+  fallback?: SectionProperties | null
+): SectionProperties {
+  return {
+    ...fallback,
+    pageWidth: Math.round(page.size.w * 15),
+    pageHeight: Math.round(page.size.h * 15),
+    marginTop: Math.round(page.margins.top * 15),
+    marginRight: Math.round(page.margins.right * 15),
+    marginBottom: Math.round(page.margins.bottom * 15),
+    marginLeft: Math.round(page.margins.left * 15),
+  };
+}
+
+/**
+ * Find the page-aware position of the element containing the given PM position.
+ * Used by both the floating comment button and the context menu comment action.
+ * Queries all elements with data-pm-start (spans, divs, imgs) — not just spans,
+ * since table cell content may use div fragments.
+ */
+function findSelectionAnchorGeometry(
+  scrollContainer: HTMLElement | null,
+  parentEl: HTMLElement | null,
+  pmPos: number
+): SelectionAnchorGeometry | null {
+  if (!scrollContainer || !parentEl) return null;
+  const pagesEl = scrollContainer.querySelector('.paged-editor__pages');
+  if (!pagesEl) return null;
+  for (const el of findBodyPmAnchors(pagesEl)) {
+    const pmStart = Number(el.dataset.pmStart);
+    const pmEnd = Number(el.dataset.pmEnd);
+    if (pmPos >= pmStart && pmPos <= pmEnd) {
+      const pageEl = el.closest('.layout-page') as HTMLElement | null;
+      if (!pageEl) return null;
+      return {
+        top: el.getBoundingClientRect().top - parentEl.getBoundingClientRect().top,
+        page: pageGeometryFromElement(pageEl, scrollContainer, parentEl),
+      };
     }
   }
   return null;
@@ -1333,6 +1510,7 @@ export const DocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(function Do
     pmTableContext: null,
     pmImageContext: null,
   });
+  const lastExplicitZoomRef = useRef(initialZoom);
 
   // Table properties dialog state
   const [tablePropsOpen, setTablePropsOpen] = useState(false);
@@ -1662,6 +1840,9 @@ export const DocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(function Do
     totalPages: number;
     visible: boolean;
   }>({ currentPage: 1, totalPages: 1, visible: false });
+  const [activePageGeometry, setActivePageGeometry] = useState<VisiblePageGeometry | null>(null);
+  const [commentRailLefts, setCommentRailLefts] =
+    useState<Map<number, number>>(EMPTY_COMMENT_RAIL_LEFTS);
   const scrollFadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Measure toolbar height for positioning the outline panel below it
@@ -1927,6 +2108,29 @@ export const DocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(function Do
     [onChange, pushDocument, cleanOrphanedComments]
   );
 
+  const refreshPageChromeGeometry = useCallback((preferredPmPos?: number | null) => {
+    const scrollContainer = scrollContainerRef.current;
+    const parentEl = editorContentRef.current;
+    if (!scrollContainer || !parentEl) return null;
+
+    const visiblePage = bestVisiblePageGeometry(scrollContainer, parentEl);
+    const selectedPage =
+      preferredPmPos != null
+        ? pageGeometryForPmPosition(scrollContainer, parentEl, preferredPmPos)
+        : null;
+    const activePage = visiblePage ?? selectedPage;
+    const nextCommentRails = collectCommentRailLefts(scrollContainer, parentEl);
+
+    setActivePageGeometry((prev) =>
+      visiblePageGeometryEqual(prev, activePage) ? prev : activePage
+    );
+    setCommentRailLefts((prev) =>
+      railLeftsEqual(prev, nextCommentRails) ? prev : nextCommentRails
+    );
+
+    return selectedPage ?? activePage;
+  }, []);
+
   // Recompute the floating "add comment" button position from the current PM
   // selection + page/container geometry. Called from handleSelectionChange and
   // from the geometry-change effects below (resize, zoom), because PagedEditor's
@@ -1948,15 +2152,12 @@ export const DocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(function Do
     const container = scrollContainerRef.current;
     const parentEl = editorContentRef.current;
     if (!container || !parentEl) return;
-    const top = findSelectionYPosition(container, parentEl, from);
-    if (top == null) return;
-    const pagesEl = container.querySelector('.paged-editor__pages');
-    const pageEl = pagesEl?.querySelector('.layout-page') as HTMLElement | null;
-    const left = pageEl
-      ? pageEl.getBoundingClientRect().right - parentEl.getBoundingClientRect().left
-      : parentEl.getBoundingClientRect().width / 2 + 408;
-    setFloatingCommentBtn({ top, left });
-  }, []);
+    const anchor = findSelectionAnchorGeometry(container, parentEl, from);
+    const activePage = refreshPageChromeGeometry(from);
+    const page = anchor?.page ?? activePage;
+    if (!anchor || !page) return;
+    setFloatingCommentBtn({ top: anchor.top, left: page.right });
+  }, [refreshPageChromeGeometry]);
   // Keep the readOnly ref used by recomputeFloatingCommentBtn in sync
   readOnlyForFloatingBtnRef.current = readOnly;
 
@@ -1971,18 +2172,49 @@ export const DocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(function Do
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
-    const ro = new ResizeObserver(() => recomputeFloatingCommentBtn());
+    const updateGeometry = () => {
+      recomputeFloatingCommentBtn();
+      refreshPageChromeGeometry();
+    };
+    const ro = new ResizeObserver(updateGeometry);
     ro.observe(container);
-    const onWinResize = () => recomputeFloatingCommentBtn();
+    const onWinResize = updateGeometry;
     window.addEventListener('resize', onWinResize);
     return () => {
       ro.disconnect();
       window.removeEventListener('resize', onWinResize);
     };
-  }, [state.isLoading, recomputeFloatingCommentBtn]);
+  }, [state.isLoading, recomputeFloatingCommentBtn, refreshPageChromeGeometry]);
   useEffect(() => {
-    recomputeFloatingCommentBtn();
-  }, [state.zoom, recomputeFloatingCommentBtn]);
+    const updateGeometry = () => {
+      recomputeFloatingCommentBtn();
+      refreshPageChromeGeometry();
+    };
+    const container = scrollContainerRef.current;
+    const viewportEl = container?.querySelector('.paged-editor__pages')?.parentElement;
+    let settleFrame: number | null = null;
+    const frame = requestAnimationFrame(() => {
+      updateGeometry();
+      settleFrame = requestAnimationFrame(updateGeometry);
+    });
+    const settleInterval = window.setInterval(updateGeometry, 100);
+    const settleTimer = window.setTimeout(() => {
+      window.clearInterval(settleInterval);
+      updateGeometry();
+    }, 1200);
+    const onTransitionEnd = (event: Event) => {
+      if (event instanceof TransitionEvent && event.propertyName !== 'transform') return;
+      updateGeometry();
+    };
+    viewportEl?.addEventListener('transitionend', onTransitionEnd);
+    return () => {
+      cancelAnimationFrame(frame);
+      if (settleFrame != null) cancelAnimationFrame(settleFrame);
+      window.clearInterval(settleInterval);
+      window.clearTimeout(settleTimer);
+      viewportEl?.removeEventListener('transitionend', onTransitionEnd);
+    };
+  }, [state.zoom, state.documentViewMode, recomputeFloatingCommentBtn, refreshPageChromeGeometry]);
 
   // Handle selection changes from ProseMirror
   const handleSelectionChange = useCallback(
@@ -2115,6 +2347,17 @@ export const DocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(function Do
 
       // Update floating comment button position
       recomputeFloatingCommentBtn();
+      if (view) {
+        const activePage = refreshPageChromeGeometry(view.state.selection.from);
+        if (activePage) {
+          const totalPages = pagedEditorRef.current?.getLayout()?.pages.length ?? 1;
+          setScrollPageInfo((prev) => ({
+            ...prev,
+            currentPage: Math.min(activePage.pageNumber, totalPages),
+            totalPages,
+          }));
+        }
+      }
 
       // Notify parent
       onSelectionChange?.(selectionState);
@@ -2129,7 +2372,15 @@ export const DocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(function Do
     },
     // getActiveEditorView's return depends on hfEditPosition; theme drives
     // color resolution. Both must be in deps to avoid stale-closure reads.
-    [onSelectionChange, isAddingComment, readOnly, getActiveEditorView, theme]
+    [
+      onSelectionChange,
+      isAddingComment,
+      readOnly,
+      getActiveEditorView,
+      theme,
+      recomputeFloatingCommentBtn,
+      refreshPageChromeGeometry,
+    ]
   );
 
   // Table selection hook
@@ -2950,6 +3201,7 @@ export const DocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(function Do
 
   // Handle zoom change
   const handleZoomChange = useCallback((zoom: number) => {
+    lastExplicitZoomRef.current = zoom;
     setState((prev) => ({
       ...prev,
       zoom,
@@ -3419,11 +3671,12 @@ export const DocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(function Do
           if (from === to) break;
           // Compute Y position BEFORE dispatching — dispatch triggers re-layout
           // which rebuilds page DOM and invalidates the old span elements
-          const yPos = findSelectionYPosition(
+          const anchor = findSelectionAnchorGeometry(
             scrollContainerRef.current,
             editorContentRef.current,
             from
           );
+          refreshPageChromeGeometry(from);
           setCommentSelectionRange({ from, to });
           const pendingMark = view.state.schema.marks.comment.create({
             commentId: PENDING_COMMENT_ID,
@@ -3431,7 +3684,7 @@ export const DocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(function Do
           const tr = view.state.tr.addMark(from, to, pendingMark);
           tr.setSelection(TextSelection.create(tr.doc, to));
           view.dispatch(tr);
-          setAddCommentYPosition(yPos);
+          setAddCommentYPosition(anchor?.top ?? null);
           setShowCommentsSidebar(true);
           setIsAddingComment(true);
           setFloatingCommentBtn(null);
@@ -3440,7 +3693,7 @@ export const DocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(function Do
       }
       // TextContextMenu calls onClose after onAction, so no need to close here
     },
-    [getActiveEditorView, focusActiveEditor, openSplitCellDialog]
+    [getActiveEditorView, focusActiveEditor, openSplitCellDialog, refreshPageChromeGeometry]
   );
 
   // Handle margin changes from rulers
@@ -3558,43 +3811,8 @@ export const DocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(function Do
       if (!layout || layout.pages.length === 0) return;
 
       const totalPages = layout.pages.length;
-      const pages = Array.from(
-        scrollContainerEl.querySelectorAll<HTMLElement>('.paged-editor__pages .layout-page')
-      );
-      let currentPage = 1;
-      if (pages.length > 0) {
-        const viewportRect = scrollContainerEl.getBoundingClientRect();
-        const viewportCenterY = viewportRect.top + viewportRect.height / 2;
-        let bestPageNumber = 1;
-        let bestVisibleArea = -1;
-        let bestCenterDistance = Number.POSITIVE_INFINITY;
-
-        for (let i = 0; i < pages.length; i++) {
-          const pageRect = pages[i].getBoundingClientRect();
-          const visibleWidth = Math.max(
-            0,
-            Math.min(pageRect.right, viewportRect.right) -
-              Math.max(pageRect.left, viewportRect.left)
-          );
-          const visibleHeight = Math.max(
-            0,
-            Math.min(pageRect.bottom, viewportRect.bottom) -
-              Math.max(pageRect.top, viewportRect.top)
-          );
-          const visibleArea = visibleWidth * visibleHeight;
-          const centerDistance = Math.abs(pageRect.top + pageRect.height / 2 - viewportCenterY);
-
-          if (
-            visibleArea > bestVisibleArea ||
-            (visibleArea === bestVisibleArea && centerDistance < bestCenterDistance)
-          ) {
-            bestVisibleArea = visibleArea;
-            bestCenterDistance = centerDistance;
-            bestPageNumber = Number(pages[i].dataset.pageNumber) || i + 1;
-          }
-        }
-        currentPage = bestPageNumber;
-      }
+      const pageGeometry = refreshPageChromeGeometry();
+      let currentPage = pageGeometry?.pageNumber ?? 1;
       currentPage = Math.min(currentPage, totalPages);
 
       setScrollPageInfo({ currentPage, totalPages, visible: true });
@@ -3618,7 +3836,7 @@ export const DocxEditor = forwardRef<DocxEditorRef, DocxEditorProps>(function Do
         clearTimeout(scrollFadeTimerRef.current);
       }
     };
-  }, [scrollContainerEl, state.documentViewMode]);
+  }, [scrollContainerEl, state.documentViewMode, refreshPageChromeGeometry]);
 
   // Handle save
   const handleSave = useCallback(
@@ -3962,13 +4180,15 @@ body { background: white; }
       getDocument: () => history.state,
       getEditorRef: () => pagedEditorRef.current,
       save: handleSave,
-      setZoom: (zoom: number) =>
+      setZoom: (zoom: number) => {
+        lastExplicitZoomRef.current = zoom;
         setState((prev) => ({
           ...prev,
           zoom,
           documentViewMode:
             prev.documentViewMode === 'pageWidth' ? 'onePage' : prev.documentViewMode,
-        })),
+        }));
+      },
       getZoom: () => state.zoom,
       focus: () => {
         pagedEditorRef.current?.focus();
@@ -4839,6 +5059,18 @@ body { background: white; }
   const pageWidthPx = sectionPropsPageWidth
     ? Math.round(sectionPropsPageWidth / 15)
     : DEFAULT_PAGE_WIDTH;
+  const activeLayoutPage =
+    activePageGeometry != null
+      ? (pagedEditorRef.current?.getLayout()?.pages[activePageGeometry.pageIndex] ?? null)
+      : null;
+  const activeRulerSectionProps = activeLayoutPage
+    ? sectionPropsFromVisiblePage(
+        activeLayoutPage,
+        history.state?.package.document?.finalSectionProperties
+      )
+    : history.state?.package.document?.finalSectionProperties;
+  const activeSidebarRailLeft =
+    activePageGeometry != null ? activePageGeometry.right + SIDEBAR_PAGE_GAP : undefined;
 
   const calculatePageWidthZoom = useCallback((): number | null => {
     const scrollContainer = scrollContainerRef.current;
@@ -4859,7 +5091,19 @@ body { background: white; }
 
   const handleDocumentViewModeChange = useCallback(
     (mode: DocumentViewMode) => {
-      setState((prev) => ({ ...prev, documentViewMode: mode }));
+      setState((prev) => {
+        if (mode === 'pageWidth' && prev.documentViewMode !== 'pageWidth') {
+          lastExplicitZoomRef.current = prev.zoom;
+        }
+        if (prev.documentViewMode === 'pageWidth' && mode !== 'pageWidth') {
+          return {
+            ...prev,
+            documentViewMode: mode,
+            zoom: lastExplicitZoomRef.current,
+          };
+        }
+        return { ...prev, documentViewMode: mode };
+      });
       if (mode === 'pageWidth') {
         requestAnimationFrame(applyPageWidthZoom);
       }
@@ -5102,43 +5346,49 @@ body { background: white; }
                       viewport is too narrow to fit page + outline + sidebar. */}
                   {showRuler && (
                     <div
-                      className="flex justify-center py-1 flex-shrink-0 bg-doc-bg"
+                      className="py-1 flex-shrink-0 bg-doc-bg"
                       style={{
                         position: 'sticky',
                         top: 0,
+                        display: activePageGeometry ? 'block' : 'flex',
+                        justifyContent: activePageGeometry ? undefined : 'center',
                         // Must sit above the inline header/footer editor
                         // (Z_INDEX.hfInlineEditor) so the ruler stays readable
                         // when the HF editor is active near the viewport top.
                         zIndex: Z_INDEX.ruler,
-                        // paddingRight biases the centered ruler so it tracks
-                        // the page when the comments sidebar (translateX)
-                        // shifts the page left. Outline doesn't bias here —
-                        // the page stays centered until minLayoutWidth forces
-                        // horizontal scroll, and the ruler centers with it.
-                        paddingLeft: 20,
-                        paddingRight: 20 + (sidebarOpen ? SIDEBAR_DOCUMENT_SHIFT * 2 : 0),
                         minWidth: minLayoutWidth,
                         transition: 'padding 0.2s ease',
                       }}
                     >
-                      <HorizontalRuler
-                        sectionProps={history.state?.package.document?.finalSectionProperties}
-                        zoom={state.zoom}
-                        unit={rulerUnit}
-                        editable={!readOnly}
-                        onLeftMarginChange={handleLeftMarginChange}
-                        onRightMarginChange={handleRightMarginChange}
-                        indentLeft={state.paragraphIndentLeft}
-                        indentRight={state.paragraphIndentRight}
-                        onIndentLeftChange={handleIndentLeftChange}
-                        onIndentRightChange={handleIndentRightChange}
-                        showFirstLineIndent={true}
-                        firstLineIndent={state.paragraphFirstLineIndent}
-                        hangingIndent={state.paragraphHangingIndent}
-                        onFirstLineIndentChange={handleFirstLineIndentChange}
-                        tabStops={state.paragraphTabs}
-                        onTabStopRemove={handleTabStopRemove}
-                      />
+                      <div
+                        style={
+                          activePageGeometry
+                            ? {
+                                marginLeft: activePageGeometry.contentLeft,
+                                width: activePageGeometry.width,
+                              }
+                            : undefined
+                        }
+                      >
+                        <HorizontalRuler
+                          sectionProps={activeRulerSectionProps}
+                          zoom={state.zoom}
+                          unit={rulerUnit}
+                          editable={!readOnly}
+                          onLeftMarginChange={handleLeftMarginChange}
+                          onRightMarginChange={handleRightMarginChange}
+                          indentLeft={state.paragraphIndentLeft}
+                          indentRight={state.paragraphIndentRight}
+                          onIndentLeftChange={handleIndentLeftChange}
+                          onIndentRightChange={handleIndentRightChange}
+                          showFirstLineIndent={true}
+                          firstLineIndent={state.paragraphFirstLineIndent}
+                          hangingIndent={state.paragraphHangingIndent}
+                          onFirstLineIndentChange={handleFirstLineIndentChange}
+                          tabStops={state.paragraphTabs}
+                          onTabStopRemove={handleTabStopRemove}
+                        />
+                      </div>
                     </div>
                   )}
                   {/* Editor content wrapper. min-width matches the ruler so
@@ -5195,7 +5445,7 @@ body { background: white; }
                           }}
                         >
                           <VerticalRuler
-                            sectionProps={initialSectionProperties}
+                            sectionProps={activeRulerSectionProps ?? initialSectionProperties}
                             zoom={state.zoom}
                             unit={rulerUnit}
                             editable={!readOnly}
@@ -5328,6 +5578,7 @@ body { background: white; }
                                 renderedDomContext={pluginRenderedDomContext ?? null}
                                 pageWidth={pageWidthPx}
                                 zoom={state.zoom}
+                                railLeft={activeSidebarRailLeft}
                                 editorContainerRef={scrollContainerRef}
                                 onExpandedItemChange={setExpandedSidebarItem}
                                 activeItemId={expandedSidebarItem}
@@ -5338,6 +5589,10 @@ body { background: white; }
                               anchorPositions={anchorPositions}
                               zoom={state.zoom}
                               pageWidth={pageWidthPx}
+                              railLefts={commentRailLefts}
+                              railLeft={
+                                activePageGeometry ? activePageGeometry.right + 6 : undefined
+                              }
                               sidebarOpen={sidebarOpen}
                               resolvedCommentIds={resolvedCommentIds}
                               onMarkerClick={() => {

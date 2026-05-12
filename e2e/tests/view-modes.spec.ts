@@ -97,6 +97,31 @@ test.describe('document page view modes', () => {
     });
   });
 
+  test('multiple-pages mode aligns the horizontal ruler to the first page in the row', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1320, height: 1000 });
+    await loadMultiPageFixture(page);
+
+    await selectPageViewMode(page, 'multiplePages');
+    await selectZoomLevel(page, 50);
+
+    await page.waitForFunction(() => {
+      const pages = Array.from(document.querySelectorAll<HTMLElement>('.layout-page'));
+      const ruler = document.querySelector<HTMLElement>('.docx-horizontal-ruler');
+      if (pages.length < 2 || !ruler) return false;
+      const first = pages[0].getBoundingClientRect();
+      const second = pages[1].getBoundingClientRect();
+      const rulerRect = ruler.getBoundingClientRect();
+      return (
+        Math.abs(first.top - second.top) < 8 &&
+        second.left > first.right &&
+        Math.abs(rulerRect.left - first.left) < 4 &&
+        Math.abs(rulerRect.width - first.width) < 4
+      );
+    });
+  });
+
   test('page-width mode fits the page to the viewport and responds to resize', async ({ page }) => {
     await page.setViewportSize({ width: 720, height: 900 });
     await loadMultiPageFixture(page);
@@ -120,5 +145,17 @@ test.describe('document page view modes', () => {
       if (!pageEl) return false;
       return pageEl.getBoundingClientRect().width > previousWidth + 80;
     }, narrowWidth);
+  });
+
+  test('leaving page-width mode restores the previous explicit zoom', async ({ page }) => {
+    await page.setViewportSize({ width: 1900, height: 1000 });
+    await loadMultiPageFixture(page);
+
+    await expect(page.getByTestId('zoom-control')).toContainText('100%');
+    await selectPageViewMode(page, 'pageWidth');
+    await expect(page.getByTestId('zoom-control')).toContainText('200%');
+
+    await selectPageViewMode(page, 'onePage');
+    await expect(page.getByTestId('zoom-control')).toContainText('100%');
   });
 });

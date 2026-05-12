@@ -15,6 +15,10 @@ export interface CommentMarginMarkersProps {
   anchorPositions: Map<string, number>;
   zoom: number;
   pageWidth: number;
+  /** Optional per-comment rendered page rail x-position. */
+  railLefts?: Map<number, number>;
+  /** Optional fallback rendered page rail x-position. */
+  railLeft?: number;
   sidebarOpen: boolean;
   resolvedCommentIds: Set<number>;
   onMarkerClick: (commentId: number) => void;
@@ -25,15 +29,23 @@ export function CommentMarginMarkers({
   anchorPositions,
   zoom,
   pageWidth,
+  railLefts,
+  railLeft,
   sidebarOpen,
   resolvedCommentIds,
   onMarkerClick,
 }: CommentMarginMarkersProps) {
   const { t } = useTranslation();
   const rootComments = comments.filter((c) => c.parentId == null);
+  type CommentMarker = {
+    comment: Comment;
+    isResolved: boolean;
+    y: number;
+    railLeft?: number;
+  };
 
   const markers = rootComments
-    .map((comment) => {
+    .map<CommentMarker | null>((comment) => {
       const isResolved = resolvedCommentIds.has(comment.id);
       // Active: hide when sidebar is open (card visible in sidebar)
       if (!isResolved && sidebarOpen) return null;
@@ -41,11 +53,12 @@ export function CommentMarginMarkers({
       if (isResolved && sidebarOpen) return null;
       const y = anchorPositions.get(`comment-${comment.id}`);
       if (y == null) return null;
-      return { comment, isResolved, y };
+      return { comment, isResolved, y, railLeft: railLefts?.get(comment.id) ?? railLeft };
     })
-    .filter(Boolean) as { comment: Comment; isResolved: boolean; y: number }[];
+    .filter((marker): marker is CommentMarker => marker != null);
 
   if (markers.length === 0) return null;
+  const hasPageAwareRails = markers.some((marker) => marker.railLeft != null);
 
   return (
     <div
@@ -54,13 +67,13 @@ export function CommentMarginMarkers({
         position: 'absolute',
         top: 0,
         // Position just past the page right edge
-        left: `calc(50% + ${(pageWidth * zoom) / 2 + 6}px)`,
+        left: hasPageAwareRails ? 0 : `calc(50% + ${(pageWidth * zoom) / 2 + 6}px)`,
         zIndex: 30,
         pointerEvents: 'none',
       }}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      {markers.map(({ comment, isResolved, y }) => (
+      {markers.map(({ comment, isResolved, y, railLeft }) => (
         <button
           key={comment.id}
           onClick={() => onMarkerClick(comment.id)}
@@ -68,7 +81,6 @@ export function CommentMarginMarkers({
           style={{
             position: 'absolute',
             top: y * zoom,
-            left: 0,
             width: 24,
             height: 24,
             display: 'flex',
@@ -81,6 +93,7 @@ export function CommentMarginMarkers({
             pointerEvents: 'auto',
             color: '#5f6368',
             padding: 0,
+            left: hasPageAwareRails ? (railLeft ?? 0) : 0,
             fontFamily: 'inherit',
           }}
           onMouseOver={(e) => {

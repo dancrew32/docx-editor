@@ -19,6 +19,8 @@ export interface UnifiedSidebarProps {
   renderedDomContext: RenderedDomContext | null;
   pageWidth: number;
   zoom: number;
+  /** Optional rendered page rail x-position, relative to the editor viewport. */
+  railLeft?: number;
   editorContainerRef: React.RefObject<HTMLDivElement | null>;
   onExpandedItemChange?: (itemId: string | null) => void;
   /** Controlled: sidebar item to expand based on cursor position. */
@@ -31,6 +33,7 @@ export function UnifiedSidebar({
   renderedDomContext,
   pageWidth,
   zoom,
+  railLeft,
   editorContainerRef,
   onExpandedItemChange,
   activeItemId,
@@ -192,7 +195,10 @@ export function UnifiedSidebar({
       style={{
         position: 'absolute',
         top: 0,
-        left: `calc(50% - ${SIDEBAR_DOCUMENT_SHIFT}px + ${(pageWidth * zoom) / 2 + SIDEBAR_PAGE_GAP}px)`,
+        left:
+          railLeft != null
+            ? railLeft
+            : `calc(50% - ${SIDEBAR_DOCUMENT_SHIFT}px + ${(pageWidth * zoom) / 2 + SIDEBAR_PAGE_GAP}px)`,
         width: SIDEBAR_WIDTH,
         fontFamily: "'Google Sans', Roboto, Arial, sans-serif",
         zIndex: 40,
