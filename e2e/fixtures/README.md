@@ -61,6 +61,12 @@ A synthetic document containing a `wps:wsp` text box in a `wp:anchor` with
 `wp:wrapSquare wrapText="bothSides"`. Used to reproduce issue #472 without
 committing the private original document.
 
+### issue-318-textbox-support.docx
+
+A synthetic document containing WPS text boxes in the body, header, and a table
+cell, plus a legacy VML text box. Used to cover issue #318 without committing a
+private source document.
+
 ## Generating Fixtures
 
 To regenerate fixtures, run:
@@ -68,6 +74,7 @@ To regenerate fixtures, run:
 ```bash
 bun run e2e/fixtures/generate-fixtures.ts
 bun scripts/create-issue-472-floating-textbox-fixture.mjs
+bun scripts/create-issue-318-textbox-support-fixture.mjs
 ```
 
 Or manually create them using Microsoft Word or another DOCX editor.

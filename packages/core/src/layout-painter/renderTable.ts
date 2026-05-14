@@ -17,6 +17,9 @@ import type {
   ParagraphBlock,
   ParagraphMeasure,
   ParagraphFragment,
+  TextBoxBlock,
+  TextBoxFragment,
+  TextBoxMeasure,
   ImageRun,
 } from '../layout-engine/types';
 import type { RenderContext } from './renderPage';
@@ -29,6 +32,7 @@ import {
 } from './floatingImageFlow';
 import { emuToPixels } from '../utils/units';
 import { renderParagraphFragment } from './renderParagraph';
+import { renderTextBoxFragment } from './renderTextBox';
 import { measureParagraph, type FloatingImageZone } from '../layout-bridge/measuring';
 
 /**
@@ -309,6 +313,38 @@ function renderCellContent(
       }
       contentEl.appendChild(nestedTableEl);
       cumulativeY += effectiveSpaceBefore + ((measure as TableMeasure).totalHeight ?? 0);
+      previousParagraphAfter = 0;
+    } else if (block?.kind === 'textBox' && measure?.kind === 'textBox') {
+      const textBoxBlock = block as TextBoxBlock;
+      const textBoxMeasure = measure as TextBoxMeasure;
+      const effectiveSpaceBefore = previousParagraphAfter;
+      cumulativeY += effectiveSpaceBefore;
+
+      const textBoxFragment: TextBoxFragment = {
+        kind: 'textBox',
+        blockId: textBoxBlock.id,
+        x: 0,
+        y: cumulativeY,
+        width: textBoxMeasure.width,
+        height: textBoxMeasure.height,
+        pmStart: textBoxBlock.pmStart,
+        pmEnd: textBoxBlock.pmEnd,
+        isFloating: textBoxBlock.displayMode === 'float',
+        zIndex: textBoxBlock.wrapType === 'behind' ? -1 : 1,
+      };
+
+      const textBoxEl = renderTextBoxFragment(
+        textBoxFragment,
+        textBoxBlock,
+        textBoxMeasure,
+        { ...context, insideTableCell: true as const },
+        { document: doc }
+      );
+      textBoxEl.style.left = `${textBoxFragment.x}px`;
+      textBoxEl.style.top = `${textBoxFragment.y}px`;
+      contentEl.appendChild(textBoxEl);
+
+      cumulativeY += textBoxMeasure.height;
       previousParagraphAfter = 0;
     }
   }

@@ -1552,15 +1552,46 @@ function tableRowAttrsToFormatting(attrs: TableRowAttrs): TableRowFormatting | u
 function convertPMTableCell(node: PMNode, documentCounts?: TrackedChangeCounts): TableCell {
   const attrs = node.attrs as TableCellAttrs;
   const content: (Paragraph | Table)[] = [];
+  let pendingAnchoredTextBoxRuns: Run[] = [];
 
-  // Extract cell content (paragraphs and nested tables)
+  const flushPendingTextBoxes = (): void => {
+    for (const run of pendingAnchoredTextBoxRuns) {
+      content.push({
+        type: 'paragraph',
+        content: [run],
+      });
+    }
+    pendingAnchoredTextBoxRuns = [];
+  };
+
+  // Extract cell content (paragraphs, nested tables, and text boxes).
   node.forEach((contentNode) => {
     if (contentNode.type.name === 'paragraph') {
-      content.push(convertPMParagraph(contentNode, documentCounts));
+      const paragraph = convertPMParagraph(contentNode, documentCounts);
+      if (pendingAnchoredTextBoxRuns.length > 0) {
+        paragraph.content = [...pendingAnchoredTextBoxRuns, ...paragraph.content];
+        pendingAnchoredTextBoxRuns = [];
+      }
+      content.push(paragraph);
     } else if (contentNode.type.name === 'table') {
+      flushPendingTextBoxes();
       content.push(convertPMTable(contentNode, documentCounts));
+    } else if (contentNode.type.name === 'textBox') {
+      const textBoxRun = convertPMTextBoxRun(contentNode);
+      const textBoxAttrs = contentNode.attrs as TextBoxAttrs;
+      if (shouldExportTextBoxInsideFollowingParagraph(textBoxAttrs)) {
+        pendingAnchoredTextBoxRuns.push(textBoxRun);
+      } else {
+        flushPendingTextBoxes();
+        content.push({
+          type: 'paragraph',
+          content: [textBoxRun],
+        });
+      }
     }
   });
+
+  flushPendingTextBoxes();
 
   return {
     type: 'tableCell',
@@ -1698,7 +1729,7 @@ function convertPMTextBoxRun(node: PMNode): Run {
   // Build shape with text body
   const shape: Shape = {
     type: 'shape',
-    shapeType: 'rect',
+    shapeType: 'textBox',
     id: attrs.textBoxId || undefined,
     size: {
       width: attrs.width ? pixelsToEmu(attrs.width) : 0,
