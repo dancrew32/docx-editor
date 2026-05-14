@@ -21,7 +21,8 @@ import type {
   FieldRun,
   TabStop,
 } from '../layout-engine/types';
-import { isFloatingImageRun, type RenderContext } from './renderPage';
+import type { RenderContext } from './renderPage';
+import { isFloatingImageRun } from './floatingImageFlow';
 import { applyImageVisualAttrs, hasImageVisualAttrs } from './renderImage';
 import {
   calculateTabWidth,
