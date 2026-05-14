@@ -48,6 +48,7 @@ import type { TableAttrs, TableRowAttrs, TableCellAttrs } from '../schema/nodes'
 import { resolveColorToHex } from '../../utils/colorResolver';
 import { mergeTextFormatting } from '../../utils/textFormattingMerge';
 import type { Theme } from '../../types/document';
+import { isAnchoredDocxTextBox, textBoxAnchorAttrsFromDocx } from './textBoxAnchors';
 
 /**
  * Options for document conversion
@@ -1742,11 +1743,21 @@ function convertParagraphWithTextBoxes(
   const pmParagraph = convertParagraph(block, styleResolver);
   const nodes: PMNode[] = [];
   const isEmptyAfterExtraction = textBoxes.length > 0 && pmParagraph.content.size === 0;
+
+  for (const tb of textBoxes) {
+    if (isAnchoredDocxTextBox(tb)) {
+      nodes.push(convertTextBox(tb, styleResolver));
+    }
+  }
+
   if (!isEmptyAfterExtraction) {
     nodes.push(pmParagraph);
   }
+
   for (const tb of textBoxes) {
-    nodes.push(convertTextBox(tb, styleResolver));
+    if (!isAnchoredDocxTextBox(tb)) {
+      nodes.push(convertTextBox(tb, styleResolver));
+    }
   }
   return nodes;
 }
@@ -1840,6 +1851,7 @@ function convertTextBox(textBox: TextBox, styleResolver: StyleResolver | null): 
       marginBottom,
       marginLeft,
       marginRight,
+      ...textBoxAnchorAttrsFromDocx(textBox),
     },
     contentNodes
   );
