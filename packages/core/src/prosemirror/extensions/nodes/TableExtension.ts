@@ -379,7 +379,7 @@ function buildCellWidthStyles(attrs: TableCellAttrs): string[] {
 }
 
 const tableCellSpec: NodeSpec = {
-  content: '(paragraph | table)+',
+  content: '(paragraph | table | textBox)+',
   tableRole: 'cell',
   isolating: true,
   attrs: {
@@ -438,7 +438,7 @@ const tableCellSpec: NodeSpec = {
 };
 
 const tableHeaderSpec: NodeSpec = {
-  content: '(paragraph | table)+',
+  content: '(paragraph | table | textBox)+',
   tableRole: 'header_cell',
   isolating: true,
   attrs: {

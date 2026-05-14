@@ -40,6 +40,7 @@ import type { NumberingMap } from './numberingParser';
 import { parseXml, findChildren, getAttribute, type XmlElement } from './xmlParser';
 import { parseParagraph } from './paragraphParser';
 import { parseTable } from './tableParser';
+import { enrichParagraphTextBoxes } from './textBoxEnrichment';
 
 // ============================================================================
 // HEADER/FOOTER MAP INTERFACE
@@ -191,7 +192,9 @@ function parseHeaderFooterContent(
 
     // Parse paragraphs
     if (name === 'w:p' || name.endsWith(':p')) {
-      content.push(parseParagraph(el, styles, theme, numbering, rels, media, opts));
+      const paragraph = parseParagraph(el, styles, theme, numbering, rels, media, opts);
+      enrichParagraphTextBoxes(paragraph, el, styles, theme, numbering, rels, media, opts);
+      content.push(paragraph);
     }
     // Parse tables
     else if (name === 'w:tbl' || name.endsWith(':tbl')) {

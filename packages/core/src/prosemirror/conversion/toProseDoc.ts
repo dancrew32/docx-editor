@@ -1025,7 +1025,9 @@ function convertTableCell(
   const contentNodes: PMNode[] = [];
   for (const content of cell.content) {
     if (content.type === 'paragraph') {
-      contentNodes.push(convertParagraph(content, styleResolver, undefined, conditionalStyle?.rPr));
+      contentNodes.push(
+        ...convertParagraphWithTextBoxes(content, styleResolver, conditionalStyle?.rPr)
+      );
     } else if (content.type === 'table') {
       // Nested tables - recursively convert
       contentNodes.push(convertTable(content, styleResolver));
@@ -1737,10 +1739,11 @@ function convertShape(shape: Shape): PMNode {
  */
 function convertParagraphWithTextBoxes(
   block: Paragraph,
-  styleResolver: StyleResolver | null
+  styleResolver: StyleResolver | null,
+  runFormattingOverride?: TextFormatting
 ): PMNode[] {
   const textBoxes = extractTextBoxesFromParagraph(block);
-  const pmParagraph = convertParagraph(block, styleResolver);
+  const pmParagraph = convertParagraph(block, styleResolver, undefined, runFormattingOverride);
   const nodes: PMNode[] = [];
   const isEmptyAfterExtraction = textBoxes.length > 0 && pmParagraph.content.size === 0;
   const { anchored, inFlow } = partitionTextBoxesByAnchor(textBoxes);

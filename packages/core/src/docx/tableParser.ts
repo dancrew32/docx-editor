@@ -49,6 +49,7 @@ import type {
 import type { StyleMap } from './styleParser';
 import type { NumberingMap } from './numberingParser';
 import { parseParagraph } from './paragraphParser';
+import { enrichParagraphTextBoxes } from './textBoxEnrichment';
 import {
   findChild,
   findChildren,
@@ -892,6 +893,9 @@ function parseCellContent(
     if (localName === 'p') {
       // Parse paragraph
       const para = parseParagraph(child, styles, theme, numbering, rels, media, options);
+      enrichParagraphTextBoxes(para, child, styles, theme, numbering, rels, media, {
+        inHeaderFooter: options?.inHeaderFooter,
+      });
       content.push(para);
     } else if (localName === 'tbl') {
       // Parse nested table (recursive)

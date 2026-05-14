@@ -30,6 +30,7 @@ import { renderParagraphFragment } from './renderParagraph';
 import { renderTableFragment } from './renderTable';
 import { renderImageFragment } from './renderImage';
 import { renderTextBoxFragment } from './renderTextBox';
+import { renderHeaderFooterTextBox } from './headerFooterTextBox';
 import type { BlockLookup } from './index';
 import type { BorderSpec } from '../types/document';
 import { borderToStyle } from '../utils/formatToStyle';
@@ -768,6 +769,17 @@ function renderHeaderFooterContent(
         containerEl.appendChild(fragEl);
         cursorY += measure.totalHeight;
       }
+    } else if (block.kind === 'textBox' && measure.kind === 'textBox') {
+      const { element, advanceHeight } = renderHeaderFooterTextBox(
+        block,
+        measure,
+        cursorY,
+        context,
+        layout,
+        doc
+      );
+      containerEl.appendChild(element);
+      cursorY += advanceHeight;
     }
   }
 
@@ -1224,7 +1236,7 @@ export function renderPage(
       headerContentEl.style.top = `${-headerVisualTop}px`;
       // Do not clip header containers that include media. Their measured content
       // height can exclude absolutely positioned runs, which causes visible cut-off.
-      if (headerContentEl.querySelector('img')) {
+      if (headerContentEl.querySelector('img, .layout-textbox')) {
         shouldClipHeader = false;
       }
       headerEl.appendChild(headerContentEl);
@@ -1274,7 +1286,7 @@ export function renderPage(
         }
       );
       footerContentEl.style.top = `${-footerVisualTop}px`;
-      if (footerContentEl.querySelector('img')) {
+      if (footerContentEl.querySelector('img, .layout-textbox')) {
         shouldClipFooter = false;
       }
       footerEl.appendChild(footerContentEl);
