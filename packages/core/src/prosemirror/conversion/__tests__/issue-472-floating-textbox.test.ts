@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { parseDocx } from '../../../docx/parser';
 import { toProseDoc } from '../toProseDoc';
 import { fromProseDoc } from '../fromProseDoc';
+import { textBoxAnchorAttrsFromDocx } from '../textBoxAnchors';
 
 const FIXTURE = resolve(process.cwd(), 'e2e/fixtures/issue-472-floating-textbox.docx');
 
@@ -80,5 +81,17 @@ describe('issue #472 anchored text box conversion', () => {
       vertical: { relativeTo: 'page', posOffset: 2279650 },
     });
     expect(paragraph.content[1]?.type).toBe('run');
+  });
+
+  test('marks every non-inline DOCX text box as anchored for export', () => {
+    const attrs = textBoxAnchorAttrsFromDocx({
+      type: 'textBox',
+      size: { width: 100, height: 100 },
+      wrap: { type: 'topAndBottom' },
+      content: [],
+    });
+
+    expect(attrs.displayMode).toBe('block');
+    expect(attrs.anchorTarget).toBe('followingBlock');
   });
 });

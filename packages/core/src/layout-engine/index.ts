@@ -37,7 +37,7 @@ import {
   getMidChainIndices,
   hasPageBreakBefore,
 } from './keep-together';
-import { isFloatingWrapType } from '../docx/wrapTypes';
+import { isFloatingTextBoxBlock } from './textBoxFlow';
 
 // Default page size (US Letter in pixels at 96 DPI)
 const DEFAULT_PAGE_SIZE = { w: 816, h: 1056 };
@@ -759,7 +759,7 @@ function layoutTextBox(
     throw new Error(`layoutTextBox: expected textBox measure`);
   }
 
-  if (block.displayMode === 'float' || isFloatingWrapType(block.wrapType)) {
+  if (isFloatingTextBoxBlock(block)) {
     const state = paginator.getCurrentState();
     const fragment: TextBoxFragment = {
       kind: 'textBox',

@@ -53,7 +53,7 @@ import type {
 } from '../schema/nodes';
 import type { TextColorAttrs, UnderlineAttrs, FontFamilyAttrs } from '../schema/marks';
 import {
-  isAnchoredTextBoxAttrs,
+  shouldExportTextBoxInsideFollowingParagraph,
   textBoxPositionFromAttrs,
   textBoxWrapFromAttrs,
 } from './textBoxAnchors';
@@ -123,7 +123,7 @@ function extractBlocks(pmDoc: PMNode): (Paragraph | Table)[] {
       blocks.push(convertPMTable(node, documentCounts));
     } else if (node.type.name === 'textBox') {
       const attrs = node.attrs as TextBoxAttrs;
-      if (attrs.anchorTarget === 'followingBlock' || isAnchoredTextBoxAttrs(attrs)) {
+      if (shouldExportTextBoxInsideFollowingParagraph(attrs)) {
         pendingAnchoredTextBoxRuns.push(convertPMTextBoxRun(node));
       } else {
         flushPendingTextBoxes();

@@ -1301,7 +1301,7 @@ export function renderParagraphFragment(
       }
     }
 
-    if (line.segments && line.segments.length > 1 && !block.attrs?.listMarker) {
+    if (canRenderSplitLineAroundFloatingObject(line, block)) {
       const splitLineEl = doc.createElement('div');
       splitLineEl.className = `${PARAGRAPH_CLASS_NAMES.line} layout-line-split`;
       splitLineEl.style.position = 'relative';
@@ -1470,6 +1470,13 @@ export function renderParagraphFragment(
   }
 
   return fragmentEl;
+}
+
+function canRenderSplitLineAroundFloatingObject(
+  line: MeasuredLine,
+  block: ParagraphBlock
+): line is MeasuredLine & { segments: NonNullable<MeasuredLine['segments']> } {
+  return (line.segments?.length ?? 0) > 1 && !block.attrs?.listMarker;
 }
 
 /**

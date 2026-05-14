@@ -17,6 +17,7 @@ export type TextBoxAnchorAttrs = Pick<
   | 'distRight'
 >;
 
+/** DOCX text boxes with any non-inline wrap are authored as anchored shapes. */
 export function isAnchoredDocxTextBox(textBox: Pick<TextBox, 'wrap'>): boolean {
   return !!textBox.wrap && textBox.wrap.type !== 'inline';
 }
@@ -32,7 +33,7 @@ export function textBoxAnchorAttrsFromDocx(textBox: TextBox): TextBoxAnchorAttrs
     cssFloat: getTextBoxCssFloat(wrapType, wrapText, hAlign),
     wrapType,
     wrapText,
-    anchorTarget: displayMode === 'float' ? 'followingBlock' : undefined,
+    anchorTarget: isAnchoredDocxTextBox(textBox) ? 'followingBlock' : undefined,
     position: textBox.position ? positionToAttrs(textBox.position) : undefined,
     distTop: textBox.wrap?.distT != null ? emuToPixels(textBox.wrap.distT) : undefined,
     distBottom: textBox.wrap?.distB != null ? emuToPixels(textBox.wrap.distB) : undefined,
@@ -41,8 +42,8 @@ export function textBoxAnchorAttrsFromDocx(textBox: TextBox): TextBoxAnchorAttrs
   };
 }
 
-export function isAnchoredTextBoxAttrs(attrs: TextBoxAttrs): boolean {
-  return attrs.displayMode === 'float' || isFloatingWrapType(attrs.wrapType);
+export function shouldExportTextBoxInsideFollowingParagraph(attrs: TextBoxAttrs): boolean {
+  return attrs.anchorTarget === 'followingBlock' || isFloatingTextBoxAttrs(attrs);
 }
 
 export function textBoxPositionFromAttrs(attrs: TextBoxAttrs): ImagePosition | undefined {
@@ -84,6 +85,10 @@ function getTextBoxDisplayMode(wrapType: string): TextBoxAttrs['displayMode'] {
   if (wrapType === 'inline') return 'inline';
   if (wrapType === 'topAndBottom') return 'block';
   return 'float';
+}
+
+function isFloatingTextBoxAttrs(attrs: TextBoxAttrs): boolean {
+  return attrs.displayMode === 'float' || isFloatingWrapType(attrs.wrapType);
 }
 
 function getTextBoxCssFloat(

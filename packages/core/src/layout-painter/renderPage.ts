@@ -43,6 +43,7 @@ import {
 import { resolveFontFamily } from '../utils/fontResolver';
 import { isFloatingWrapType, isWrapNone, wrapsAroundText } from '../docx/wrapTypes';
 import { pointsToPixels } from '../utils/units';
+import { floatingTextBoxWrapsText, isFloatingTextBoxBlock } from '../layout-engine/textBoxFlow';
 
 /**
  * Page-level floating image that has been extracted from paragraphs.
@@ -771,18 +772,6 @@ function resolveAnchoredObjectPosition(
   }
 
   return { x, y, side };
-}
-
-function isFloatingTextBoxBlock(block: TextBoxBlock): boolean {
-  return block.displayMode === 'float' || isFloatingWrapType(block.wrapType);
-}
-
-function floatingTextBoxWrapsText(block: TextBoxBlock): boolean {
-  return (
-    isFloatingTextBoxBlock(block) &&
-    !isWrapNone(block.wrapType) &&
-    block.wrapType !== 'topAndBottom'
-  );
 }
 
 /**

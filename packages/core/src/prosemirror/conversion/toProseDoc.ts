@@ -1743,23 +1743,38 @@ function convertParagraphWithTextBoxes(
   const pmParagraph = convertParagraph(block, styleResolver);
   const nodes: PMNode[] = [];
   const isEmptyAfterExtraction = textBoxes.length > 0 && pmParagraph.content.size === 0;
+  const { anchored, inFlow } = partitionTextBoxesByAnchor(textBoxes);
 
-  for (const tb of textBoxes) {
-    if (isAnchoredDocxTextBox(tb)) {
-      nodes.push(convertTextBox(tb, styleResolver));
-    }
+  for (const tb of anchored) {
+    nodes.push(convertTextBox(tb, styleResolver));
   }
 
   if (!isEmptyAfterExtraction) {
     nodes.push(pmParagraph);
   }
 
-  for (const tb of textBoxes) {
-    if (!isAnchoredDocxTextBox(tb)) {
-      nodes.push(convertTextBox(tb, styleResolver));
-    }
+  for (const tb of inFlow) {
+    nodes.push(convertTextBox(tb, styleResolver));
   }
   return nodes;
+}
+
+function partitionTextBoxesByAnchor(textBoxes: TextBox[]): {
+  anchored: TextBox[];
+  inFlow: TextBox[];
+} {
+  const anchored: TextBox[] = [];
+  const inFlow: TextBox[] = [];
+
+  for (const textBox of textBoxes) {
+    if (isAnchoredDocxTextBox(textBox)) {
+      anchored.push(textBox);
+    } else {
+      inFlow.push(textBox);
+    }
+  }
+
+  return { anchored, inFlow };
 }
 
 /**

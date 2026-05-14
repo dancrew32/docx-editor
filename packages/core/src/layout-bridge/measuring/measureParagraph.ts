@@ -19,10 +19,12 @@ import type {
   ParagraphSpacing,
 } from '../../layout-engine/types';
 import {
+  getFloatingAvailableWidth,
   getFloatingMargins,
   type FloatingImageZone,
   type FloatingLineSegmentZone,
 } from './floatingZones';
+import { wrapsAroundText } from '../../docx/wrapTypes';
 
 import {
   measureTextWidth,
@@ -344,10 +346,7 @@ export function measureParagraph(
   );
   const firstLineWidth = Math.max(
     1,
-    firstLineFloatingMargins.segments?.reduce((sum, segment) => sum + segment.availableWidth, 0) ??
-      baseFirstLineWidth -
-        firstLineFloatingMargins.leftMargin -
-        firstLineFloatingMargins.rightMargin
+    getFloatingAvailableWidth(firstLineFloatingMargins, baseFirstLineWidth)
   );
 
   const lines: MeasuredLine[] = [];
@@ -579,11 +578,7 @@ export function measureParagraph(
     );
 
     // Body content width minus floating image margins
-    const adjustedWidth = Math.max(
-      1,
-      floatingMargins.segments?.reduce((sum, segment) => sum + segment.availableWidth, 0) ??
-        bodyContentWidth - floatingMargins.leftMargin - floatingMargins.rightMargin
-    );
+    const adjustedWidth = Math.max(1, getFloatingAvailableWidth(floatingMargins, bodyContentWidth));
 
     currentLine = {
       fromRun: runIndex,
@@ -651,9 +646,7 @@ export function measureParagraph(
 
     if (isImageRun(run)) {
       const wrapType = run.wrapType;
-      const isFloating =
-        run.displayMode === 'float' ||
-        (wrapType && ['square', 'tight', 'through'].includes(wrapType));
+      const isFloating = run.displayMode === 'float' || wrapsAroundText(wrapType);
 
       // Skip truly floating images - they don't contribute to line height
       // (they are positioned absolutely and text wraps around them)

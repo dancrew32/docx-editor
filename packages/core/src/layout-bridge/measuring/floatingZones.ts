@@ -30,6 +30,12 @@ export interface FloatingLineSegmentZone {
   availableWidth: number;
 }
 
+export interface FloatingLineMargins {
+  leftMargin: number;
+  rightMargin: number;
+  segments?: FloatingLineSegmentZone[];
+}
+
 export function rectsToFloatingZones(
   rects: FloatingExclusionRect[],
   contentWidth: number
@@ -44,30 +50,29 @@ export function rectsToFloatingZones(
     let rightMargin = 0;
     let segments: FloatingLineSegmentZone[] | undefined;
 
-    const wt = rect.wrapText ?? 'bothSides';
+    const wrapText = rect.wrapText ?? 'bothSides';
 
-    if (wt === 'right') {
-      leftMargin = Math.max(0, rectRight);
-    } else if (wt === 'left') {
-      rightMargin = Math.max(0, contentWidth - rectLeft);
-    } else if (rectLeft > 0 && rectRight < contentWidth) {
-      segments = [
-        { leftOffset: 0, availableWidth: Math.max(0, rectLeft) },
-        {
-          leftOffset: Math.max(0, rectRight),
-          availableWidth: Math.max(0, contentWidth - rectRight),
-        },
-      ].filter((segment) => segment.availableWidth > 1);
-      leftMargin = 0;
-      rightMargin = 0;
+    if (wrapText === 'right') {
+      leftMargin = leftObjectMargin(rectRight);
+    } else if (wrapText === 'left') {
+      rightMargin = rightObjectMargin(rectLeft, contentWidth);
+    } else if (wrapText === 'largest') {
+      ({ leftMargin, rightMargin } = largestSideMargins(rectLeft, rectRight, contentWidth));
+    } else if (canSplitCenteredBothSidesWrap(rectLeft, rectRight, contentWidth)) {
+      segments = centeredWrapSegments(rectLeft, rectRight, contentWidth);
     } else if (rect.side === 'left') {
-      leftMargin = Math.max(0, rectRight);
+      leftMargin = leftObjectMargin(rectRight);
     } else {
-      rightMargin = Math.max(0, contentWidth - rectLeft);
+      rightMargin = rightObjectMargin(rectLeft, contentWidth);
     }
 
     return { leftMargin, rightMargin, topY: rectTop, bottomY: rectBottom, segments };
   });
+}
+
+export function getFloatingAvailableWidth(margins: FloatingLineMargins, baseWidth: number): number {
+  const segmentWidth = margins.segments?.reduce((sum, segment) => sum + segment.availableWidth, 0);
+  return segmentWidth ?? baseWidth - margins.leftMargin - margins.rightMargin;
 }
 
 export function getFloatingMargins(
@@ -75,7 +80,7 @@ export function getFloatingMargins(
   lineHeight: number,
   zones: FloatingImageZone[] | undefined,
   paragraphYOffset: number
-): { leftMargin: number; rightMargin: number; segments?: FloatingLineSegmentZone[] } {
+): FloatingLineMargins {
   if (!zones || zones.length === 0) {
     return { leftMargin: 0, rightMargin: 0 };
   }
@@ -118,4 +123,46 @@ function intersectSegments(
     }
   }
   return result;
+}
+
+function canSplitCenteredBothSidesWrap(
+  rectLeft: number,
+  rectRight: number,
+  contentWidth: number
+): boolean {
+  return rectLeft > 0 && rectRight < contentWidth;
+}
+
+function centeredWrapSegments(
+  rectLeft: number,
+  rectRight: number,
+  contentWidth: number
+): FloatingLineSegmentZone[] {
+  return [
+    { leftOffset: 0, availableWidth: Math.max(0, rectLeft) },
+    {
+      leftOffset: Math.max(0, rectRight),
+      availableWidth: Math.max(0, contentWidth - rectRight),
+    },
+  ].filter((segment) => segment.availableWidth > 1);
+}
+
+function largestSideMargins(
+  rectLeft: number,
+  rectRight: number,
+  contentWidth: number
+): Pick<FloatingLineMargins, 'leftMargin' | 'rightMargin'> {
+  const leftWidth = Math.max(0, rectLeft);
+  const rightWidth = Math.max(0, contentWidth - rectRight);
+  return rightWidth >= leftWidth
+    ? { leftMargin: leftObjectMargin(rectRight), rightMargin: 0 }
+    : { leftMargin: 0, rightMargin: rightObjectMargin(rectLeft, contentWidth) };
+}
+
+function leftObjectMargin(rectRight: number): number {
+  return Math.max(0, rectRight);
+}
+
+function rightObjectMargin(rectLeft: number, contentWidth: number): number {
+  return Math.max(0, contentWidth - rectLeft);
 }
