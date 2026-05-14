@@ -1130,9 +1130,6 @@ export function renderPage(
     }
 
     applyFragmentStyles(fragmentEl, fragment, { left: page.margins.left, top: page.margins.top });
-    if (fragment.kind === 'textBox' && 'isFloating' in fragment && fragment.isFloating) {
-      fragmentEl.style.zIndex = String(fragment.zIndex ?? 10);
-    }
     contentEl.appendChild(fragmentEl);
   }
 
