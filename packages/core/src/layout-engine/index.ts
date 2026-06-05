@@ -43,6 +43,7 @@ import {
 import { isFloatingTextBoxBlock } from './textBoxFlow';
 import { buildTableRowBreakInfo, snapRowBreak } from './tableRowBreak';
 import { MIN_WRAP_SEGMENT_WIDTH } from '../layout-bridge/measuring/floatingZones';
+import { getParagraphFragmentPmRange } from './paragraphFragmentRange';
 
 // Default page size (US Letter in pixels at 96 DPI)
 const DEFAULT_PAGE_SIZE = { w: 816, h: 1056 };
@@ -444,6 +445,12 @@ function layoutParagraph(
     const isLastFragment = currentLineIndex + fittingLines >= lines.length;
     const effectiveSpaceBefore = isFirstFragment ? spaceBefore : 0;
     const effectiveSpaceAfter = isLastFragment ? spaceAfter : 0;
+    const pmRange = getParagraphFragmentPmRange(
+      block,
+      measure,
+      currentLineIndex,
+      currentLineIndex + fittingLines
+    );
 
     const fragment: ParagraphFragment = {
       kind: 'paragraph',
@@ -454,8 +461,8 @@ function layoutParagraph(
       height: linesHeight,
       fromLine: currentLineIndex,
       toLine: currentLineIndex + fittingLines,
-      pmStart: block.pmStart,
-      pmEnd: block.pmEnd,
+      pmStart: pmRange.pmStart,
+      pmEnd: pmRange.pmEnd,
       continuesFromPrev: !isFirstFragment,
       continuesOnNext: !isLastFragment,
     };
