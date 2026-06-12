@@ -320,17 +320,12 @@ export type ImageRunPosition = {
 
 // @public
 export interface InlineSdtWidget {
-    // (undocumented)
     alias?: string;
-    // (undocumented)
     checked?: boolean;
-    // (undocumented)
     groupId: string;
     // (undocumented)
     kind: 'checkbox';
-    // (undocumented)
     pos: number;
-    // (undocumented)
     tag?: string;
 }
 
