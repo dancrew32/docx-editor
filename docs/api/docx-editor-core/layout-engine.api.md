@@ -319,6 +319,22 @@ export type ImageRunPosition = {
 };
 
 // @public
+export interface InlineSdtWidget {
+    // (undocumented)
+    alias?: string;
+    // (undocumented)
+    checked?: boolean;
+    // (undocumented)
+    groupId: string;
+    // (undocumented)
+    kind: 'checkbox';
+    // (undocumented)
+    pos: number;
+    // (undocumented)
+    tag?: string;
+}
+
+// @public
 export function isFloatingTextBoxBlock(block: TextBoxFlowAttrs): boolean;
 
 // @public
@@ -867,6 +883,7 @@ export type TextRun = RunFormatting & {
     hyperlink?: HyperlinkInfo;
     pmStart?: number;
     pmEnd?: number;
+    inlineSdtWidget?: InlineSdtWidget;
 };
 
 // @public
